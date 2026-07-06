@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import View, Button, Modal, TextInput
 import requests
 import json
 import random
@@ -11,7 +11,7 @@ from datetime import datetime
 # --- BOT AYARLARI ---
 TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 359199132906422273
-PANEL_CHANNEL_ID = 1523633754550046760  # Admin panel kanalının ID'si
+PANEL_CHANNEL_ID = 1523633754550046760
 
 # --- InfinityFree PHP API Adresi ---
 API_URL = 'https://santeshub.great-site.net/api.php'
@@ -22,135 +22,149 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# Anahtar oluşturma fonksiyonu
+# --- YARDIMCI FONKSİYONLAR ---
 def generate_key():
     chars = string.ascii_uppercase + string.digits
     part1 = ''.join(random.choices(chars, k=6))
     part2 = ''.join(random.choices(chars, k=6))
     return f"SANTES-{part1}-{part2}"
 
-# --- YARDIMCI FONKSİYON: DM ATMA ---
-async def send_dm_to_admin(content):
+async def send_dm_to_admin(username, duration, new_key):
     try:
         admin_user = await bot.fetch_user(ADMIN_ID)
-        await admin_user.send(content)
+        embed = discord.Embed(
+            title="🔐 **YENİ ANAHTAR OLUŞTURULDU!**",
+            description=(
+                f"👤 **Kullanıcı:** {username}\n"
+                f"⏳ **Süre:** {duration}\n"
+                f"🔑 **Anahtar:** `{new_key}`"
+            ),
+            color=0xff2a43
+        )
+        embed.set_footer(text="Bu anahtarı kullanıcıya iletmeyi unutma.")
+        await admin_user.send(embed=embed)
     except:
         pass
 
-# --- BOT HAZIR OLDUĞUNDA ---
+# ============================================================
+# MODAL (Key Oluşturma Formu) - ESKİ HALİ
+# ============================================================
+class KeyCreateModal(Modal):
+    def __init__(self):
+        super().__init__(title="🔐 Yeni Anahtar Oluştur")
+        
+        self.username_input = TextInput(
+            label="👤 Kullanıcı Adı",
+            placeholder="Örn: SantesKullanici",
+            min_length=3,
+            max_length=30
+        )
+        self.duration_input = TextInput(
+            label="⏳ Süre (1gün, 1hafta, 1ay, 1yıl)",
+            placeholder="Örn: 1ay"
+        )
+        self.add_item(self.username_input)
+        self.add_item(self.duration_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        username = self.username_input.value
+        duration = self.duration_input.value.lower().strip()
+
+        # Süre kontrolü
+        allowed = ['1gün', '1hafta', '1ay', '1yıl']
+        if duration not in allowed:
+            embed = discord.Embed(
+                title="❌ Geçersiz Süre",
+                description=f"Lütfen şunlardan birini yaz: `{', '.join(allowed)}`",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        # Anahtar oluştur
+        new_key = generate_key()
+        
+        # InfinityFree API'sine gönder
+        payload = {
+            "api_key": API_SECRET,
+            "action": "create_key",
+            "username": username,
+            "duration": duration,
+            "key": new_key
+        }
+        
+        try:
+            response = requests.post(API_URL, json=payload)
+            data = response.json()
+            
+            if data.get('status') == 'success':
+                
+                # Admin'e DM at
+                await send_dm_to_admin(username, duration, new_key)
+
+                # Kullanıcıya başarılı mesaj
+                embed = discord.Embed(
+                    title="✅ Anahtar Oluşturuldu!",
+                    description=(
+                        f"👤 **Kullanıcı:** {username}\n"
+                        f"⏳ **Süre:** {duration}\n"
+                        f"🔑 **Anahtar:** `{new_key}`"
+                    ),
+                    color=0x00ff00
+                )
+                embed.set_footer(text="Anahtar DM'den admin'e iletildi.")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+            else:
+                embed = discord.Embed(
+                    title="❌ API Hatası",
+                    description=f"Sunucu hatası: {data.get('message', 'Bilinmeyen hata')}",
+                    color=0xff0000
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+        except:
+            embed = discord.Embed(
+                title="❌ Bağlantı Hatası",
+                description="Bot, InfinityFree API'sine bağlanamadı!",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ============================================================
+# PANEL BUTONLARI (ESKİ HALİ)
+# ============================================================
+class PanelView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🔐 Key Oluştur", style=discord.ButtonStyle.success, custom_id="btn_create")
+    async def create_key(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(KeyCreateModal())
+
+# ============================================================
+# BOT HAZIR OLDUĞUNDA PANELİ KANALA AT
+# ============================================================
 @bot.event
 async def on_ready():
-    print(f"✅ Premium bot giriş yaptı: {bot.user.name}")
+    print(f"✅ Premium butonlu bot giriş yaptı: {bot.user.name}")
     
-    # Admin panel kanalına bir hoş geldin mesajı at
     channel = bot.get_channel(PANEL_CHANNEL_ID)
     if channel:
         embed = discord.Embed(
-            title="🛠️ Santes Hub Bot Aktif!",
-            description="Aşağıdaki komutu kullanarak yeni anahtarlar oluşturabilirsin.\n\n`/key KullanıcıAdı 1gün`",
+            title="🛠️ **Santes Hub Yönetim Paneli**",
+            description=(
+                "Aşağıdaki butonu kullanarak anahtar oluşturabilirsin.\n\n"
+                "🔐 **Key Oluştur:** Yeni bir lisans anahtarı oluşturur ve sana DM'den gönderir."
+            ),
             color=0xff2a43
         )
         embed.set_footer(text="Santes Hub Premium Bot v3.0")
-        await channel.send(embed=embed)
-
-# --- ANA KOMUT: KEY OLUŞTUR ---
-@bot.command()
-async def key(ctx, username: str = None, duration: str = None):
-    
-    # Kullanıcı sadece /key yazarsa yardım mesajı göster
-    if username is None or duration is None:
-        embed = discord.Embed(
-            title="❌ Eksik Bilgi",
-            description="**Doğru kullanım:** `/key KullanıcıAdı 1gün`\n\n**Süre seçenekleri:** `1gün`, `1hafta`, `1ay`, `1yıl`",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
-        return
-
-    # Süre kontrolü
-    allowed = ['1gün', '1hafta', '1ay', '1yıl']
-    if duration not in allowed:
-        embed = discord.Embed(
-            title="❌ Geçersiz Süre",
-            description=f"Lütfen şu sürelerden birini kullan: `{', '.join(allowed)}`",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
-        return
-
-    # Anahtar oluştur
-    new_key = generate_key()
-    
-    # InfinityFree API'sine gönder
-    payload = {
-        "api_key": API_SECRET,
-        "action": "create_key",
-        "username": username,
-        "duration": duration,
-        "key": new_key
-    }
-    
-    try:
-        response = requests.post(API_URL, json=payload)
-        data = response.json()
         
-        if data.get('status') == 'success':
-            
-            # --- 1. KANALA (PUBLİK) BAŞARI MESAJI AT ---
-            embed_public = discord.Embed(
-                title="✅ Yeni Anahtar Oluşturuldu!",
-                description=(
-                    f"👤 **Kullanıcı:** {username}\n"
-                    f"⏳ **Süre:** {duration}\n"
-                    f"🔑 **Anahtar:** `{new_key}`"
-                ),
-                color=0x00ff00
-            )
-            embed_public.set_footer(text="Santes Hub Premium Bot")
-            await ctx.send(embed=embed_public)
-            
-            # --- 2. ÖZEL BOT KANALINA (ADMIN PANEL) DETAYLI MESAJ AT ---
-            admin_channel = bot.get_channel(PANEL_CHANNEL_ID)
-            if admin_channel:
-                embed_admin = discord.Embed(
-                    title="🔐 **YENİ ANAHTAR OLUŞTURULDU (ADMIN)**",
-                    description=(
-                        f"📌 **Kullanıcı Adı:** {username}\n"
-                        f"⏳ **Süre:** {duration}\n"
-                        f"🔑 **Anahtar:** `{new_key}`\n"
-                        f"📅 **Oluşturulma:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                    ),
-                    color=0xff2a43
-                )
-                embed_admin.set_footer(text="Admin Paneli")
-                await admin_channel.send(embed=embed_admin)
+        # Mesajı ve butonları kanala gönder
+        await channel.send(embed=embed, view=PanelView())
 
-            # --- 3. ADMİNE (SANA) DM GÖNDER ---
-            await send_dm_to_admin(
-                f"🔐 **Yeni anahtar oluşturuldu ve siteye kaydedildi!**\n\n"
-                f"👤 Kullanıcı: {username}\n"
-                f"⏳ Süre: {duration}\n"
-                f"🔑 Anahtar: `{new_key}`\n\n"
-                f"📌 Bu anahtarı kullanıcıya iletmeyi unutma."
-            )
-            
-        else:
-            # API hatası
-            embed = discord.Embed(
-                title="❌ API Hatası",
-                description=f"Site hatası: {data.get('message', 'Bilinmeyen hata')}",
-                color=0xff0000
-            )
-            await ctx.send(embed=embed)
-            
-    except Exception as e:
-        # Bağlantı hatası
-        embed = discord.Embed(
-            title="❌ Bağlantı Hatası",
-            description=f"Discord botu siteye bağlanamıyor! Hata: {str(e)}",
-            color=0xff0000
-        )
-        await ctx.send(embed=embed)
-
-# Botu başlat
+# ============================================================
+# BOTU BAŞLAT
+# ============================================================
 bot.run(TOKEN)
