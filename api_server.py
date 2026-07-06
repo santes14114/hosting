@@ -4,14 +4,11 @@ import os
 
 app = Flask(__name__)
 
-# Botun veri dosyasının yolu
-DATA_FILE = 'keys_data.json'
-
 @app.route('/keys', methods=['GET'])
 def get_keys():
-    # Anahtarları JSON olarak dışarıya ver
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
+    # keys_data.json dosyasını oku
+    if os.path.exists('keys_data.json'):
+        with open('keys_data.json', 'r') as f:
             try:
                 data = json.load(f)
                 return jsonify(data)
