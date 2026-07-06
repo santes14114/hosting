@@ -25,12 +25,10 @@ class PanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    # 1.1 Key Oluştur Butonu
     @discord.ui.button(label="🔐 Key Oluştur", style=discord.ButtonStyle.success)
     async def create_key(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(CreateKeyModal())
 
-    # 1.2 Key Sil Butonu
     @discord.ui.button(label="🗑️ Key Sil", style=discord.ButtonStyle.danger)
     async def delete_key(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(DeleteKeyModal())
@@ -54,11 +52,20 @@ class CreateKeyModal(Modal):
         # Rastgele anahtar oluştur
         new_key = f"SANTES-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
 
-        # API'ye istek at (GET)
-        url = f"{API_URL}?api_key={API_SECRET}&action=create_key&username={username}&duration={duration}&key={new_key}"
+        # API'ye POST isteği (User-Agent ile)
+        payload = {
+            "api_key": API_SECRET,
+            "action": "create_key",
+            "username": username,
+            "duration": duration,
+            "key": new_key
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
 
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=10)
             data = response.json()
             
             # Sonucu DM'ye yolla
@@ -71,6 +78,9 @@ class CreateKeyModal(Modal):
             await admin_user.send(embed=embed)
 
             await interaction.response.send_message("✅ Anahtar oluşturma isteği atıldı. Sonuç DM'den gönderildi.", ephemeral=True)
+        
+        except requests.exceptions.ConnectionError:
+            await interaction.response.send_message("❌ InfinityFree bağlantıyı kopardı! Lütfen birkaç saniye sonra tekrar dene.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
 
@@ -87,11 +97,18 @@ class DeleteKeyModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         key_to_delete = self.key_input.value.strip()
 
-        # API'ye istek at (GET)
-        url = f"{API_URL}?api_key={API_SECRET}&action=delete_key&key={key_to_delete}"
+        # API'ye POST isteği
+        payload = {
+            "api_key": API_SECRET,
+            "action": "delete_key",
+            "key": key_to_delete
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
 
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=10)
             data = response.json()
             
             # Sonucu DM'ye yolla
@@ -104,6 +121,9 @@ class DeleteKeyModal(Modal):
             await admin_user.send(embed=embed)
 
             await interaction.response.send_message("✅ Silme isteği atıldı. Sonuç DM'den gönderildi.", ephemeral=True)
+        
+        except requests.exceptions.ConnectionError:
+            await interaction.response.send_message("❌ InfinityFree bağlantıyı kopardı! Lütfen birkaç saniye sonra tekrar dene.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
 
