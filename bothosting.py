@@ -1,8 +1,8 @@
 """
 ============================================================
-SANTES HUB - DISCORD BOTU (PREMIUM VERSION)
-Bu bot, yönetim paneli için butonlar ve modal formlar içerir.
-Admin, butonlara basarak anahtar oluşturabilir ve yönetebilir.
+SANTES HUB - DISCORD BOTU (PREMIUM VERSION - FULL)
+Bu bot, yönetim paneli için butonlar, modal formlar,
+anahtar listeleme ve silme özelliklerini içerir.
 ============================================================
 """
 
@@ -31,15 +31,13 @@ PANEL_CHANNEL_ID = 1523633754550046760
 API_URL = 'https://santeshub.great-site.net/api.php'
 API_SECRET = 'SANTES_EN_IYI_BABA_VE_ADAMDIR_SECRET_API_KEY'
 
-# ----------------------------------------------------------------
-# 2. BOT KURULUMU
-# ----------------------------------------------------------------
+# Botu oluştur
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # ----------------------------------------------------------------
-# 3. YARDIMCI FONKSİYONLAR
+# 2. YARDIMCI FONKSİYONLAR
 # ----------------------------------------------------------------
 
 def generate_key():
@@ -48,6 +46,36 @@ def generate_key():
     part1 = ''.join(random.choices(chars, k=6))
     part2 = ''.join(random.choices(chars, k=6))
     return f"SANTES-{part1}-{part2}"
+
+def calculate_duration(duration_str):
+    """Verilen süreye göre bitiş tarihini hesaplar (Yerel hesaplama, API'ye gerek yok)."""
+    now = datetime.now()
+    if duration_str == '1gün':
+        return now + timedelta(days=1)
+    elif duration_str == '1hafta':
+        return now + timedelta(weeks=1)
+    elif duration_str == '1ay':
+        return now + timedelta(days=30)
+    elif duration_str == '1yıl':
+        return now + timedelta(days=365)
+    return now + timedelta(days=1)
+
+def days_left(expiry_date_str):
+    """Kalan gün ve saati hesaplar (Süslü format)."""
+    try:
+        expiry = datetime.strptime(expiry_date_str, "%Y-%m-%d %H:%M:%S")
+        now = datetime.now()
+        delta = expiry - now
+        if delta.total_seconds() <= 0:
+            return "⛔ **Süresi Doldu**"
+        days = delta.days
+        hours = delta.seconds // 3600
+        if days > 0:
+            return f"📅 **{days} gün {hours} saat**"
+        else:
+            return f"⏰ **{hours} saat**"
+    except:
+        return "❓ **Hesaplanamıyor**"
 
 async def send_dm_to_admin(username, duration, new_key):
     """Admin'e özel mesaj (DM) gönderir."""
@@ -68,27 +96,22 @@ async def send_dm_to_admin(username, duration, new_key):
         pass
 
 # ----------------------------------------------------------------
-# 4. MODAL: KEY OLUŞTURMA FORMU (ESKİ HALİ)
+# 3. MODAL: KEY OLUŞTURMA FORMU
 # ----------------------------------------------------------------
 class KeyCreateModal(Modal):
     def __init__(self):
         super().__init__(title="🔐 Yeni Anahtar Oluştur")
         
-        # Kullanıcı Adı Inputu
         self.username_input = TextInput(
             label="👤 Kullanıcı Adı",
             placeholder="Örn: SantesKullanici",
             min_length=3,
             max_length=30
         )
-        
-        # Süre Inputu
         self.duration_input = TextInput(
             label="⏳ Süre (1gün, 1hafta, 1ay, 1yıl)",
             placeholder="Örn: 1ay"
         )
-        
-        # Inputları forma ekle
         self.add_item(self.username_input)
         self.add_item(self.duration_input)
 
@@ -111,7 +134,7 @@ class KeyCreateModal(Modal):
         new_key = generate_key()
         
         # ----------------------------------------------------------------
-        # API'YE VERİ GÖNDER (InfinityFree)
+        # API'YE VERİ GÖNDER (InfinityFree) - Timeout ve User-Agent eklendi
         # ----------------------------------------------------------------
         payload = {
             "api_key": API_SECRET,
@@ -122,7 +145,12 @@ class KeyCreateModal(Modal):
         }
         
         try:
-            response = requests.post(API_URL, json=payload)
+            # Timeout ve User-Agent ekleyerek bağlantı hatasını önledik
+            headers = {
+                'User-Agent': 'SantesHub-Bot/3.0',
+                'Content-Type': 'application/json'
+            }
+            response = requests.post(API_URL, json=payload, headers=headers, timeout=10)
             data = response.json()
             
             if data.get('status') == 'success':
@@ -151,16 +179,84 @@ class KeyCreateModal(Modal):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 
-        except Exception as e:
+        except requests.exceptions.Timeout:
             embed = discord.Embed(
-                title="❌ Bağlantı Hatası",
-                description=f"Bot, InfinityFree API'sine bağlanamadı! Hata: {str(e)}",
+                title="❌ Zaman Aşımı Hatası",
+                description="InfinityFree sunucusu yanıt vermiyor. Lütfen birkaç saniye sonra tekrar deneyin.",
+                color=0xff0000
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+                
+        except requests.exceptions.ConnectionError as e:
+            embed = discord.Embed(
+                title="❌ Bağlantı Kesildi",
+                description="InfinityFree ile bağlantı kurulamadı. (Sunucu botu bloklamış olabilir).",
                 color=0xff0000
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ----------------------------------------------------------------
-# 5. PANEL BUTONLARI (ESKİ HALİ)
+# 4. KEY KONTROL PANELİ (Listeleme ve Silme Modalı)
+# ----------------------------------------------------------------
+
+# Silme Onay Butonları
+class ConfirmDeleteView(View):
+    def __init__(self, key_to_delete):
+        super().__init__(timeout=60)
+        self.key_to_delete = key_to_delete
+
+    @discord.ui.button(label="✅ Evet, Sil", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: Button):
+        # Bot API'ye silme isteği gönderir
+        payload = {
+            "api_key": API_SECRET,
+            "action": "delete_key",
+            "key": self.key_to_delete
+        }
+        try:
+            response = requests.post(API_URL, json=payload, timeout=10)
+            data = response.json()
+            if data.get('status') == 'success':
+                embed = discord.Embed(
+                    title="🗑️ Anahtar Silindi!",
+                    description=f"**`{self.key_to_delete}`** anahtarı başarıyla silindi.",
+                    color=0x00ff00
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+            else:
+                embed = discord.Embed(
+                    title="❌ Silme Hatası",
+                    description=data.get('message', 'Bilinmeyen hata'),
+                    color=0xff0000
+                )
+                await interaction.response.edit_message(embed=embed, view=None)
+        except:
+            embed = discord.Embed(title="❌ Bağlantı Hatası", description="Silme işlemi sırasında hata oluştu.", color=0xff0000)
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label="❌ İptal", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        embed = discord.Embed(title="❌ Silme İşlemi İptal Edildi", description="Hiçbir anahtar silinmedi.", color=0xff2a43)
+        await interaction.response.edit_message(embed=embed, view=None)
+
+# Silme Modalı
+class KeyDeleteModal(Modal):
+    def __init__(self):
+        super().__init__(title="🗑️ Anahtar Sil")
+        self.key_input = TextInput(label="Silmek istediğin anahtarı yaz", placeholder="SANTES-XXXXXX-YYYYYY")
+        self.add_item(self.key_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        key_to_delete = self.key_input.value.strip()
+        embed = discord.Embed(
+            title="⚠️ **Silme Onayı**",
+            description=f"**`{key_to_delete}`** anahtarını silmek istediğinize emin misiniz?\n\n⚠️ **Bu işlem geri alınamaz!**",
+            color=0xff2a43
+        )
+        await interaction.response.send_message(embed=embed, view=ConfirmDeleteView(key_to_delete), ephemeral=True)
+
+# ----------------------------------------------------------------
+# 5. PANEL BUTONLARI (ANA PANEL)
 # ----------------------------------------------------------------
 class PanelView(View):
     def __init__(self):
@@ -168,11 +264,74 @@ class PanelView(View):
 
     @discord.ui.button(label="🔐 Key Oluştur", style=discord.ButtonStyle.success, custom_id="btn_create")
     async def create_key(self, interaction: discord.Interaction, button: Button):
-        # Butona basıldığında Modal (Form) aç
         await interaction.response.send_modal(KeyCreateModal())
 
+    @discord.ui.button(label="📋 Key Kontrol Paneli", style=discord.ButtonStyle.primary, custom_id="btn_list")
+    async def list_keys(self, interaction: discord.Interaction, button: Button):
+        # API'den anahtarları çek
+        try:
+            response = requests.get(f"{API_URL}?action=list_keys&api_key={API_SECRET}", timeout=10)
+            data = response.json()
+            keys = data.get('keys', [])
+            
+            if not keys:
+                embed = discord.Embed(title="📋 Key Kontrol Paneli", description="📭 **Henüz hiç anahtar oluşturulmamış.**", color=0xff2a43)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            embed = discord.Embed(title="📋 **Key Kontrol Paneli**", description=f"**Toplam {len(keys)} anahtar bulundu.**", color=0xff2a43)
+            
+            for k in keys[:10]:
+                remaining = days_left(k['expires_at'])
+                embed.add_field(
+                    name=f"🔑 **{k['username']}**",
+                    value=f"`{k['key']}`\n⏳ **Kalan:** {remaining}\n📅 **Bitiş:** {k['expires_at']}",
+                    inline=False
+                )
+            if len(keys) > 10:
+                embed.set_footer(text=f"ve {len(keys) - 10} anahtar daha...")
+            await interaction.response.send_message(embed=embed, view=KeyControlView(), ephemeral=True)
+            
+        except:
+            embed = discord.Embed(title="❌ Bağlantı Hatası", description="Anahtar listesi alınamadı.", color=0xff0000)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # ----------------------------------------------------------------
-# 6. BOT HAZIR OLDUĞUNDA PANELİ KANALA AT
+# 6. KEY KONTROL PANELİ (Yenile ve Sil Butonları)
+# ----------------------------------------------------------------
+class KeyControlView(View):
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @discord.ui.button(label="🔄 Yenile", style=discord.ButtonStyle.secondary, custom_id="btn_refresh")
+    async def refresh(self, interaction: discord.Interaction, button: Button):
+        # Aynı listeleme kodunu tekrar çalıştır
+        try:
+            response = requests.get(f"{API_URL}?action=list_keys&api_key={API_SECRET}", timeout=10)
+            data = response.json()
+            keys = data.get('keys', [])
+            
+            embed = discord.Embed(title="📋 **Key Kontrol Paneli (Yenilendi)**", description=f"**Toplam {len(keys)} anahtar bulundu.**", color=0xff2a43)
+            for k in keys[:10]:
+                remaining = days_left(k['expires_at'])
+                embed.add_field(
+                    name=f"🔑 **{k['username']}**",
+                    value=f"`{k['key']}`\n⏳ **Kalan:** {remaining}\n📅 **Bitiş:** {k['expires_at']}",
+                    inline=False
+                )
+            if len(keys) > 10:
+                embed.set_footer(text=f"ve {len(keys) - 10} anahtar daha...")
+            await interaction.response.edit_message(embed=embed, view=KeyControlView())
+        except:
+            embed = discord.Embed(title="❌ Bağlantı Hatası", description="Liste yenilenemedi.", color=0xff0000)
+            await interaction.response.edit_message(embed=embed, view=None)
+
+    @discord.ui.button(label="🗑️ Anahtar Sil", style=discord.ButtonStyle.danger, custom_id="btn_delete")
+    async def delete_key(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(KeyDeleteModal())
+
+# ----------------------------------------------------------------
+# 7. BOT HAZIR OLDUĞUNDA PANELİ KANALA AT
 # ----------------------------------------------------------------
 @bot.event
 async def on_ready():
@@ -183,17 +342,17 @@ async def on_ready():
         embed = discord.Embed(
             title="🛠️ **Santes Hub Yönetim Paneli**",
             description=(
-                "Aşağıdaki butonu kullanarak anahtar oluşturabilirsin.\n\n"
-                "🔐 **Key Oluştur:** Yeni bir lisans anahtarı oluşturur ve sana DM'den gönderir."
+                "Aşağıdaki butonları kullanarak anahtar oluşturabilir veya kontrol edebilirsin.\n\n"
+                "🔐 **Key Oluştur:** Yeni bir lisans anahtarı oluşturur ve sana DM'den gönderir.\n\n"
+                "📋 **Key Kontrol Paneli:** Tüm anahtarları listeler, kalan sürelerini gösterir ve silme imkanı verir."
             ),
             color=0xff2a43
         )
         embed.set_footer(text="Santes Hub Premium Bot v3.0")
         
-        # Mesajı ve butonları kanala gönder
         await channel.send(embed=embed, view=PanelView())
 
 # ----------------------------------------------------------------
-# 7. BOTU BAŞLAT
+# 8. BOTU BAŞLAT
 # ----------------------------------------------------------------
 bot.run(TOKEN)
