@@ -6,13 +6,13 @@ import json
 import random
 import string
 import os
+import urllib.parse
 
 TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 359199132906422273
 PANEL_CHANNEL_ID = 1523633754550046760
 
 API_URL = 'https://santeshub.great-site.net/api.php'
-API_SECRET = 'SANTES_GIZLI_API_SIFRESI_2026'
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -49,25 +49,32 @@ class CreateKeyModal(Modal):
         username = self.username_input.value
         duration = self.duration_input.value.lower().strip()
 
-        # Rastgele anahtar oluştur
+        if duration not in ['1gün', '1hafta', '1ay', '1yıl']:
+            await interaction.response.send_message("❌ Geçersiz süre!", ephemeral=True)
+            return
+
         new_key = f"SANTES-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
 
-        # API'ye POST isteği (User-Agent ile)
-        payload = {
-            "api_key": API_SECRET,
-            "action": "create_key",
-            "username": username,
-            "duration": duration,
-            "key": new_key
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        # API'ye GET isteği at (Şifre yok!)
+        url = f"{API_URL}?action=create_key&username={urllib.parse.quote(username)}&duration={duration}&key={new_key}"
 
         try:
-            response = requests.post(API_URL, json=payload, headers=headers, timeout=10)
-            data = response.json()
+            response = requests.get(url, timeout=10)
             
+            if response.status_code != 200:
+                await interaction.response.send_message(f"❌ HTTP Hatası: {response.status_code}", ephemeral=True)
+                return
+
+            if not response.text.strip():
+                await interaction.response.send_message("❌ API'den boş cevap geldi!", ephemeral=True)
+                return
+
+            try:
+                data = response.json()
+            except json.JSONDecodeError:
+                await interaction.response.send_message(f"❌ JSON Hatası! Gelen: {response.text[:100]}...", ephemeral=True)
+                return
+
             # Sonucu DM'ye yolla
             admin_user = await bot.fetch_user(ADMIN_ID)
             embed = discord.Embed(
@@ -80,7 +87,7 @@ class CreateKeyModal(Modal):
             await interaction.response.send_message("✅ Anahtar oluşturma isteği atıldı. Sonuç DM'den gönderildi.", ephemeral=True)
         
         except requests.exceptions.ConnectionError:
-            await interaction.response.send_message("❌ InfinityFree bağlantıyı kopardı! Lütfen birkaç saniye sonra tekrar dene.", ephemeral=True)
+            await interaction.response.send_message("❌ Bağlantı kesildi! InfinityFree sunucusu yanıt vermiyor.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
 
@@ -97,20 +104,30 @@ class DeleteKeyModal(Modal):
     async def on_submit(self, interaction: discord.Interaction):
         key_to_delete = self.key_input.value.strip()
 
-        # API'ye POST isteği
-        payload = {
-            "api_key": API_SECRET,
-            "action": "delete_key",
-            "key": key_to_delete
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        if not key_to_delete:
+            await interaction.response.send_message("❌ Lütfen geçerli bir anahtar girin!", ephemeral=True)
+            return
+
+        # API'ye GET isteği at (Şifre yok!)
+        url = f"{API_URL}?action=delete_key&key={urllib.parse.quote(key_to_delete)}"
 
         try:
-            response = requests.post(API_URL, json=payload, headers=headers, timeout=10)
-            data = response.json()
+            response = requests.get(url, timeout=10)
             
+            if response.status_code != 200:
+                await interaction.response.send_message(f"❌ HTTP Hatası: {response.status_code}", ephemeral=True)
+                return
+
+            if not response.text.strip():
+                await interaction.response.send_message("❌ API'den boş cevap geldi!", ephemeral=True)
+                return
+
+            try:
+                data = response.json()
+            except json.JSONDecodeError:
+                await interaction.response.send_message(f"❌ JSON Hatası! Gelen: {response.text[:100]}...", ephemeral=True)
+                return
+
             # Sonucu DM'ye yolla
             admin_user = await bot.fetch_user(ADMIN_ID)
             embed = discord.Embed(
@@ -123,7 +140,7 @@ class DeleteKeyModal(Modal):
             await interaction.response.send_message("✅ Silme isteği atıldı. Sonuç DM'den gönderildi.", ephemeral=True)
         
         except requests.exceptions.ConnectionError:
-            await interaction.response.send_message("❌ InfinityFree bağlantıyı kopardı! Lütfen birkaç saniye sonra tekrar dene.", ephemeral=True)
+            await interaction.response.send_message("❌ Bağlantı kesildi! InfinityFree sunucusu yanıt vermiyor.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Hata: {str(e)}", ephemeral=True)
 
