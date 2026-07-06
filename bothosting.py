@@ -1,3 +1,11 @@
+"""
+============================================================
+SANTES HUB - DISCORD BOTU (PREMIUM VERSION)
+Bu bot, yönetim paneli için butonlar ve modal formlar içerir.
+Admin, butonlara basarak anahtar oluşturabilir ve yönetebilir.
+============================================================
+"""
+
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Modal, TextInput
@@ -6,30 +14,43 @@ import json
 import random
 import string
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- BOT AYARLARI ---
+# ----------------------------------------------------------------
+# 1. BOT AYARLARI VE DEĞİŞKENLER
+# ----------------------------------------------------------------
+
+# Discord Bot Tokeni (Railway Environment Variable'dan alınır)
 TOKEN = os.getenv('BOT_TOKEN')
+
+# Admin ve Kanal ID'leri (Hardcoded)
 ADMIN_ID = 359199132906422273
 PANEL_CHANNEL_ID = 1523633754550046760
 
-# --- InfinityFree PHP API Adresi ---
+# InfinityFree PHP API Adresi
 API_URL = 'https://santeshub.great-site.net/api.php'
 API_SECRET = 'SANTES_EN_IYI_BABA_VE_ADAMDIR_SECRET_API_KEY'
 
-# Botu oluştur
+# ----------------------------------------------------------------
+# 2. BOT KURULUMU
+# ----------------------------------------------------------------
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# --- YARDIMCI FONKSİYONLAR ---
+# ----------------------------------------------------------------
+# 3. YARDIMCI FONKSİYONLAR
+# ----------------------------------------------------------------
+
 def generate_key():
+    """Rastgele 16 haneli bir SANTES anahtarı oluşturur."""
     chars = string.ascii_uppercase + string.digits
     part1 = ''.join(random.choices(chars, k=6))
     part2 = ''.join(random.choices(chars, k=6))
     return f"SANTES-{part1}-{part2}"
 
 async def send_dm_to_admin(username, duration, new_key):
+    """Admin'e özel mesaj (DM) gönderir."""
     try:
         admin_user = await bot.fetch_user(ADMIN_ID)
         embed = discord.Embed(
@@ -46,23 +67,28 @@ async def send_dm_to_admin(username, duration, new_key):
     except:
         pass
 
-# ============================================================
-# MODAL (Key Oluşturma Formu) - ESKİ HALİ
-# ============================================================
+# ----------------------------------------------------------------
+# 4. MODAL: KEY OLUŞTURMA FORMU (ESKİ HALİ)
+# ----------------------------------------------------------------
 class KeyCreateModal(Modal):
     def __init__(self):
         super().__init__(title="🔐 Yeni Anahtar Oluştur")
         
+        # Kullanıcı Adı Inputu
         self.username_input = TextInput(
             label="👤 Kullanıcı Adı",
             placeholder="Örn: SantesKullanici",
             min_length=3,
             max_length=30
         )
+        
+        # Süre Inputu
         self.duration_input = TextInput(
             label="⏳ Süre (1gün, 1hafta, 1ay, 1yıl)",
             placeholder="Örn: 1ay"
         )
+        
+        # Inputları forma ekle
         self.add_item(self.username_input)
         self.add_item(self.duration_input)
 
@@ -81,10 +107,12 @@ class KeyCreateModal(Modal):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # Anahtar oluştur
+        # Yeni anahtar oluştur
         new_key = generate_key()
         
-        # InfinityFree API'sine gönder
+        # ----------------------------------------------------------------
+        # API'YE VERİ GÖNDER (InfinityFree)
+        # ----------------------------------------------------------------
         payload = {
             "api_key": API_SECRET,
             "action": "create_key",
@@ -99,10 +127,10 @@ class KeyCreateModal(Modal):
             
             if data.get('status') == 'success':
                 
-                # Admin'e DM at
+                # 1. Admin'e DM gönder
                 await send_dm_to_admin(username, duration, new_key)
 
-                # Kullanıcıya başarılı mesaj
+                # 2. Kullanıcıya başarılı mesaj göster
                 embed = discord.Embed(
                     title="✅ Anahtar Oluşturuldu!",
                     description=(
@@ -123,28 +151,29 @@ class KeyCreateModal(Modal):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 
-        except:
+        except Exception as e:
             embed = discord.Embed(
                 title="❌ Bağlantı Hatası",
-                description="Bot, InfinityFree API'sine bağlanamadı!",
+                description=f"Bot, InfinityFree API'sine bağlanamadı! Hata: {str(e)}",
                 color=0xff0000
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ============================================================
-# PANEL BUTONLARI (ESKİ HALİ)
-# ============================================================
+# ----------------------------------------------------------------
+# 5. PANEL BUTONLARI (ESKİ HALİ)
+# ----------------------------------------------------------------
 class PanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔐 Key Oluştur", style=discord.ButtonStyle.success, custom_id="btn_create")
     async def create_key(self, interaction: discord.Interaction, button: Button):
+        # Butona basıldığında Modal (Form) aç
         await interaction.response.send_modal(KeyCreateModal())
 
-# ============================================================
-# BOT HAZIR OLDUĞUNDA PANELİ KANALA AT
-# ============================================================
+# ----------------------------------------------------------------
+# 6. BOT HAZIR OLDUĞUNDA PANELİ KANALA AT
+# ----------------------------------------------------------------
 @bot.event
 async def on_ready():
     print(f"✅ Premium butonlu bot giriş yaptı: {bot.user.name}")
@@ -164,7 +193,7 @@ async def on_ready():
         # Mesajı ve butonları kanala gönder
         await channel.send(embed=embed, view=PanelView())
 
-# ============================================================
-# BOTU BAŞLAT
-# ============================================================
+# ----------------------------------------------------------------
+# 7. BOTU BAŞLAT
+# ----------------------------------------------------------------
 bot.run(TOKEN)
