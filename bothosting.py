@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import os
 
 # --- BOT AYARLARI ---
-TOKEN = 'BOT_TOKEN'  # Discord Developer Portal'dan al
+TOKEN = os.getenv('BOT_TOKEN')  # Discord Developer Portal'dan al
 ADMIN_ID = 359199132906422273  # Senin Discord ID'n
 
 # --- SİTE API AYARLARI ---
