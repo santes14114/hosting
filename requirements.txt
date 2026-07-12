@@ -1,26 +1,2 @@
-# SantesHub Bot
-
-## Kurulum
-```
-pip install -r requirements.txt
-```
-`.env.example` dosyasını `.env` yapıp içine bot token'ını yaz, ya da `DISCORD_BOT_TOKEN` ortam değişkenini ayarla.
-
-## Discord Developer Portal ayarları
-Bot sayfasında şu iki "Privileged Gateway Intent" AÇIK olmalı:
-- SERVER MEMBERS INTENT (giriş/çıkış karşılama için)
-- MESSAGE CONTENT INTENT (sa/naber/yardım cevapları için)
-
-## Bot izinleri (davet linkinde seçilecek)
-Manage Channels, Send Messages, Embed Links, Attach Files, Read Message History, View Channels
-
-## Çalıştırma
-```
-python bot.py
-```
-
-## Kurulum komutları (sunucuda, admin olarak)
-- `/talep-paneli` → çalıştırıldığı kanala ticket panelini gönderir
-- `/iletisim-paneli` → kurucu-destek kanalına iletişim panelini gönderir
-
-İkisi de kalıcıdır, tekrar çalıştırmadıkça tekrar göndermez.
+discord.py>=2.4.0
+Pillow>=10.0.0
