@@ -1,0 +1,1 @@
+DISCORD_BOT_TOKEN=buraya_bot_tokenini_yapistir
