@@ -324,6 +324,121 @@ async def send_log(embed: discord.Embed, channel_id: int = LOG_CHANNEL_ID):
         except:
             await channel.send(embed=embed)
 
+# ============================================================
+# MASS DM KOMUTU - HERKESE TOPLU DM
+# ============================================================
+@bot.command(name="massdm")
+@commands.check(yetkili_kontrol)
+async def massdm_command(ctx, *, mesaj: str):
+    """Sunucudaki tüm üyelere toplu DM gönderir."""
+    
+    # Onay mesajı
+    onay_embed = discord.Embed(
+        title="⚠️ Toplu DM Onayı",
+        description=f"**{ctx.guild.member_count}** kişiye DM göndermek üzeresin!\n\n"
+                    f"Mesaj: ```\n{mesaj}\n```\n\n"
+                    "Bu işlem uzun sürebilir. Devam etmek istediğine emin misin?",
+        color=discord.Color.orange(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    onay_embed.set_footer(text="10 saniye içinde cevap vermezsen iptal olur.")
+    
+    onay_mesaji = await ctx.send(embed=onay_embed)
+    
+    # Onay bekleniyor
+    def kontrol(m):
+        return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ["evet", "e", "hayir", "h", "iptal"]
+    
+    try:
+        cevap = await bot.wait_for('message', timeout=10.0, check=kontrol)
+        if cevap.content.lower() in ["hayir", "h", "iptal"]:
+            await ctx.send("❌ Toplu DM iptal edildi!")
+            await onay_mesaji.delete()
+            await cevap.delete()
+            return
+    except asyncio.TimeoutError:
+        await ctx.send("⏰ Zaman aşımı! Toplu DM iptal edildi.")
+        await onay_mesaji.delete()
+        return
+    
+    await cevap.delete()
+    await onay_mesaji.delete()
+    
+    # Gönderim başlıyor
+    durum_mesaji = await ctx.send("📨 Toplu DM gönderimi başlatılıyor...")
+    
+    basarili = 0
+    basarisiz = 0
+    engelleyenler = []
+    hatalar = []
+    
+    # Tüm üyelere mesaj gönder
+    for index, member in enumerate(ctx.guild.members, 1):
+        # Bot ve kendini atla
+        if member.bot:
+            continue
+        
+        try:
+            await member.send(f"# {mesaj}")
+            basarili += 1
+            
+            # Her 10 kişide bir durumu güncelle
+            if index % 10 == 0:
+                await durum_mesaji.edit(content=f"📨 Mesaj gönderiliyor... ({basarili} başarılı, {basarisiz} başarısız)")
+            
+            # Biraz bekle (rate limit)
+            await asyncio.sleep(0.5)
+            
+        except discord.Forbidden:
+            basarisiz += 1
+            engelleyenler.append(str(member))
+        except Exception as e:
+            basarisiz += 1
+            hatalar.append(f"{member}: {str(e)[:50]}")
+        
+        # Rate limit koruması
+        if index % 20 == 0:
+            await asyncio.sleep(1)
+    
+    # Sonuç mesajı
+    embed = discord.Embed(
+        title="📨 Toplu DM Tamamlandı!",
+        color=discord.Color.green() if basarili > 0 else discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="✅ Başarılı", value=f"{basarili} kişi", inline=True)
+    embed.add_field(name="❌ Başarısız", value=f"{basarisiz} kişi", inline=True)
+    embed.add_field(name="📊 Toplam", value=f"{basarili + basarisiz} kişi", inline=True)
+    
+    if engelleyenler:
+        embed.add_field(
+            name="🚫 DM Engelleyenler",
+            value=", ".join(engelleyenler[:10]) + (f" ve {len(engelleyenler)-10} daha..." if len(engelleyenler) > 10 else ""),
+            inline=False
+        )
+    
+    if hatalar:
+        embed.add_field(
+            name="⚠️ Hatalar",
+            value="\n".join(hatalar[:5]) + (f"\nve {len(hatalar)-5} daha..." if len(hatalar) > 5 else ""),
+            inline=False
+        )
+    
+    embed.set_footer(text=f"{SERVER_NAME} • Toplu DM Sistemi")
+    
+    await durum_mesaji.edit(content="", embed=embed)
+    
+    # Log'a kaydet
+    log_embed = discord.Embed(
+        title="📨 Toplu DM Gönderildi",
+        description=f"{ctx.author} tarafından toplu DM gönderildi.",
+        color=discord.Color.blue(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    log_embed.add_field(name="Mesaj", value=mesaj[:1000], inline=False)
+    log_embed.add_field(name="✅ Başarılı", value=basarili, inline=True)
+    log_embed.add_field(name="❌ Başarısız", value=basarisiz, inline=True)
+    await send_log(log_embed)
 
 # ============================================================
 # LOG FONKSİYONLARI
