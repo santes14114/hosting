@@ -644,6 +644,140 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
+# ============================================================
+# LOCK / UNLOCK / NUKE KOMUTLARI - FİX
+# ============================================================
+@bot.command(name="lock")
+@commands.check(yetkili_kontrol)
+async def lock_command(ctx):
+    """Kanaldaki herkese yazma iznini kapatır."""
+    try:
+        everyone = ctx.guild.default_role
+        
+        # Mevcut izinleri al ve güncelle
+        perms = ctx.channel.overwrites_for(everyone)
+        perms.send_messages = False
+        perms.add_reactions = False
+        
+        await ctx.channel.set_permissions(everyone, overwrite=perms)
+        
+        embed = discord.Embed(
+            title="🔒 Kanal Kilitlendi",
+            description=f"{ctx.channel.mention} kanalı kilitlendi! Sadece yetkililer yazabilir.",
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Yetkili", value=ctx.author.mention, inline=True)
+        embed.set_footer(text=f"{SERVER_NAME} • Kanal Yönetimi")
+        await ctx.send(embed=embed)
+        
+        log_embed = discord.Embed(
+            title="🔒 Kanal Kilitlendi",
+            description=f"{ctx.channel.mention} kanalı {ctx.author} tarafından kilitlendi.",
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(log_embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Kanal kilitlenemedi: {e}")
+
+
+@bot.command(name="unlock")
+@commands.check(yetkili_kontrol)
+async def unlock_command(ctx):
+    """Kanaldaki herkese yazma iznini açar."""
+    try:
+        everyone = ctx.guild.default_role
+        
+        # Mevcut izinleri al ve sıfırla
+        perms = ctx.channel.overwrites_for(everyone)
+        perms.send_messages = None
+        perms.add_reactions = None
+        
+        await ctx.channel.set_permissions(everyone, overwrite=perms)
+        
+        embed = discord.Embed(
+            title="🔓 Kanal Açıldı",
+            description=f"{ctx.channel.mention} kanalının kilidi açıldı! Herkes yazabilir.",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Yetkili", value=ctx.author.mention, inline=True)
+        embed.set_footer(text=f"{SERVER_NAME} • Kanal Yönetimi")
+        await ctx.send(embed=embed)
+        
+        log_embed = discord.Embed(
+            title="🔓 Kanal Açıldı",
+            description=f"{ctx.channel.mention} kanalının kilidi {ctx.author} tarafından açıldı.",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        await send_log(log_embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Kanal açılamadı: {e}")
+
+
+@bot.command(name="nuke")
+@commands.check(yetkili_kontrol)
+async def nuke_command(ctx):
+    """Kanaldaki tüm mesajları siler ve kanalı yeniden oluşturur."""
+    try:
+        channel = ctx.channel
+        
+        # Kanal bilgilerini kaydet
+        channel_name = channel.name
+        channel_category = channel.category
+        channel_position = channel.position
+        channel_topic = channel.topic
+        channel_slowmode = channel.slowmode_delay
+        channel_nsfw = channel.is_nsfw()
+        
+        # Kanal izinlerini kaydet
+        channel_overwrites = {}
+        for target, overwrite in channel.overwrites.items():
+            channel_overwrites[target] = overwrite
+        
+        # Kanalı sil
+        await channel.delete(reason=f"{ctx.author} tarafından nuke işlemi")
+        
+        # Yeni kanalı oluştur
+        new_channel = await ctx.guild.create_text_channel(
+            name=channel_name,
+            category=channel_category,
+            position=channel_position,
+            topic=channel_topic,
+            slowmode_delay=channel_slowmode,
+            nsfw=channel_nsfw,
+            overwrites=channel_overwrites,
+            reason=f"{ctx.author} tarafından nuke işlemi"
+        )
+        
+        # Başarılı mesajı
+        embed = discord.Embed(
+            title="💥 Kanal Nuke İşlemi Tamamlandı!",
+            description=f"{new_channel.mention} kanalı başarıyla yeniden oluşturuldu!",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Eski Kanal", value=f"#{channel_name}", inline=True)
+        embed.add_field(name="Yeni Kanal", value=new_channel.mention, inline=True)
+        embed.add_field(name="Yetkili", value=ctx.author.mention, inline=True)
+        embed.set_footer(text=f"{SERVER_NAME} • Nuke Sistemi")
+        await new_channel.send(embed=embed)
+        
+        log_embed = discord.Embed(
+            title="💥 Nuke İşlemi",
+            description=f"{new_channel.mention} kanalı {ctx.author} tarafından nuke işlemine uğradı.",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        log_embed.add_field(name="Eski Kanal", value=f"#{channel_name}", inline=True)
+        await send_log(log_embed)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Nuke işlemi başarısız: {e}")
 
 # ============================================================
 # YETKİLİ KOMUTLARI
