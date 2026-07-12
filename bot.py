@@ -12,14 +12,6 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# Rich Presence için (opsiyonel - botun profilinde resimli durum için)
-try:
-    from pypresence import Presence
-    PPRESENCE_AVAILABLE = True
-except ImportError:
-    PPRESENCE_AVAILABLE = False
-    log.warning("pypresence yüklü değil, Rich Presence çalışmayacak!")
-
 # ============================================================
 # AYARLAR
 # ============================================================
@@ -45,7 +37,7 @@ SERVER_NAME = "SantesHub"
 EMBED_COLOR = discord.Color.from_str("#B00000")
 
 # Discord Uygulama ID (Rich Presence için)
-DISCORD_CLIENT_ID = "1523634360081846373"  # Kendi ID'ni yaz!
+DISCORD_CLIENT_ID = "1357163103920320633"  # Kendi ID'ni yaz!
 
 # Dosya yolları
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -273,7 +265,7 @@ async def create_simple_card(member: discord.Member) -> discord.File:
 
 
 # ============================================================
-# BOT DURUMU - RICH PRESENCE
+# BOT DURUMU - YAYINDA (STREAMING)
 # ============================================================
 @tasks.loop(minutes=1)
 async def update_presence():
@@ -284,29 +276,17 @@ async def update_presence():
         member_count = guild.member_count
         uptime = get_uptime()
         
-        # Rich Presence - Resimli durum (botun profilinde gözükür)
+        # Yayında (Streaming) - Twitch/YouTube gibi gözükür
         activity = discord.Activity(
-            type=discord.ActivityType.playing,
-            name=f"SANTESHUB #FREE | {member_count} Üye",
-            state="Santes",
-            details="SANTESHUB #FREE",
-            assets={
-                "large_image": "mark",
-                "large_text": "SantesHub",
-                "small_image": "mark",
-                "small_text": "SantesHub Bot"
-            },
-            timestamps={
-                "start": 1507665886,
-                "end": 1507665886
-            },
-            party={
-                "id": "ae488379-351d-4a4f-ad32-2b9b01c91657",
-                "size": [1, 5]
-            }
+            type=discord.ActivityType.streaming,
+            name=f"📡 SantesHub • 👥 {member_count} Üye • ⏱️ {uptime}",
+            url="https://www.twitch.tv/santeshub"
         )
         
-        await bot.change_presence(activity=activity)
+        await bot.change_presence(
+            activity=activity,
+            status=discord.Status.online
+        )
 
 
 # ============================================================
@@ -524,10 +504,8 @@ _last_reply_at = {}
 async def on_ready():
     await bot.wait_until_ready()
     
-    # Presence güncellemeyi başlat
     update_presence.start()
     
-    # Panel'leri otomatik gönder
     await send_ticket_panel_automatically()
     await send_contact_panel_automatically()
     
@@ -1014,6 +992,45 @@ async def lookup_command(ctx, member: discord.Member):
     await ctx.send("✅ Bilgiler DM'ine gönderildi!", delete_after=3)
 
 
+# ============================================================
+# DM KOMUTU
+# ============================================================
+@bot.command(name="dm")
+@commands.check(yetkili_kontrol)
+async def dm_command(ctx, member: discord.Member, *, mesaj: str):
+    """Belirtilen kişiye DM gönderir."""
+    try:
+        await member.send(f"# {mesaj}")
+        
+        embed = discord.Embed(
+            title="✅ DM Gönderildi",
+            description=f"{member.mention} kişisine mesaj gönderildi!",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Mesaj", value=f"```\n{mesaj}\n```", inline=False)
+        embed.add_field(name="Gönderen", value=ctx.author.mention, inline=True)
+        embed.set_footer(text=f"{SERVER_NAME} • DM Sistemi")
+        await ctx.send(embed=embed)
+        
+        log_embed = discord.Embed(
+            title="📨 DM Gönderildi",
+            description=f"{ctx.author} → {member}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        log_embed.add_field(name="Mesaj", value=mesaj[:1000], inline=False)
+        await send_log(log_embed)
+        
+    except discord.Forbidden:
+        await ctx.send("❌ Bu kişi DM'lerini kapatmış veya beni engellemiş!")
+    except Exception as e:
+        await ctx.send(f"❌ DM gönderilemedi: {e}")
+
+
+# ============================================================
+# GENEL KOMUTLAR
+# ============================================================
 @bot.command(name="sunucu")
 async def sunucu_command(ctx):
     guild = ctx.guild
@@ -1067,7 +1084,8 @@ async def yardim_command(ctx):
             "`.webhookekle <kanal_id>` - Webhook ekler\n"
             "`.rolver @kişi @rol` - Rol verir\n"
             "`.rolal @kişi @rol` - Rol alır\n"
-            "`.lookup @kişi` - Kullanıcı bilgilerini DM ile gönderir"
+            "`.lookup @kişi` - Kullanıcı bilgilerini DM ile gönderir\n"
+            "`.dm @kişi <mesaj>` - Kişiye DM gönderir"
         ),
         inline=False
     )
