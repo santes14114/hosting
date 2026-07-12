@@ -3,6 +3,7 @@ import re
 import io
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -10,6 +11,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+# Rich Presence için (opsiyonel - botun profilinde resimli durum için)
+try:
+    from pypresence import Presence
+    PPRESENCE_AVAILABLE = True
+except ImportError:
+    PPRESENCE_AVAILABLE = False
+    log.warning("pypresence yüklü değil, Rich Presence çalışmayacak!")
 
 # ============================================================
 # AYARLAR
@@ -24,7 +33,7 @@ TICKET_CHANNEL_ID = 1525786470714183870
 LOG_CHANNEL_ID = 1523965225605402704
 
 KURUCU_ID = 359199132906422273
-KURUCU_ADI = "Santes"
+KURUCU_ADI = "Santess"
 
 # Yetkili Rolleri
 YETKILI_ROLLER = [
@@ -34,6 +43,9 @@ YETKILI_ROLLER = [
 
 SERVER_NAME = "SantesHub"
 EMBED_COLOR = discord.Color.from_str("#B00000")
+
+# Discord Uygulama ID (Rich Presence için)
+DISCORD_CLIENT_ID = "1523634360081846373"  # Kendi ID'ni yaz!
 
 # Dosya yolları
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -261,7 +273,7 @@ async def create_simple_card(member: discord.Member) -> discord.File:
 
 
 # ============================================================
-# BOT DURUMU - ALT ALTA 5 SATIR
+# BOT DURUMU - RICH PRESENCE
 # ============================================================
 @tasks.loop(minutes=1)
 async def update_presence():
@@ -272,22 +284,29 @@ async def update_presence():
         member_count = guild.member_count
         uptime = get_uptime()
         
-        # Alt alta 5 satır - Nokta, çizgi ve yıldız karışımı
+        # Rich Presence - Resimli durum (botun profilinde gözükür)
         activity = discord.Activity(
             type=discord.ActivityType.playing,
-            name=(
-                f"• 🎮 {SERVER_NAME}\n"
-                f"• 👥 {member_count} Üye\n"
-                f"• ⏱️ {uptime}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"✦ Made By Santes"
-            )
+            name=f"SANTESHUB #FREE | {member_count} Üye",
+            state="Santes",
+            details="SANTESHUB #FREE",
+            assets={
+                "large_image": "mark",
+                "large_text": "SantesHub",
+                "small_image": "mark",
+                "small_text": "SantesHub Bot"
+            },
+            timestamps={
+                "start": 1507665886,
+                "end": 1507665886
+            },
+            party={
+                "id": "ae488379-351d-4a4f-ad32-2b9b01c91657",
+                "size": [1, 5]
+            }
         )
         
-        await bot.change_presence(
-            activity=activity,
-            status=discord.Status.online
-        )
+        await bot.change_presence(activity=activity)
 
 
 # ============================================================
@@ -505,8 +524,10 @@ _last_reply_at = {}
 async def on_ready():
     await bot.wait_until_ready()
     
+    # Presence güncellemeyi başlat
     update_presence.start()
     
+    # Panel'leri otomatik gönder
     await send_ticket_panel_automatically()
     await send_contact_panel_automatically()
     
