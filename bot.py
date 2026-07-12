@@ -1,1 +1,1 @@
-DISCORD_BOT_TOKEN=buraya_bot_tokenini_yapistir
+BOT_TOKEN = os.getenv('BOT_TOKEN')
