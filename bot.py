@@ -3,13 +3,13 @@ import re
 import io
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
-from PIL import Image, ImageDraw, ImageFont
+from discord.ext import commands, tasks
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 # ============================================================
 # AYARLAR
@@ -21,7 +21,7 @@ GELEN_GIDEN_CHANNEL_ID = 1514903388746154085
 KURUCU_DESTEK_CHANNEL_ID = 1523315702520610937
 TICKET_CATEGORY_ID = 1523318288086466792
 TICKET_CHANNEL_ID = 1525786470714183870
-LOG_CHANNEL_ID = 1523965225605402704  # Log kanalı ID'si
+LOG_CHANNEL_ID = 1523965225605402704
 
 KURUCU_ID = 359199132906422273
 STAFF_ROLE_IDS = []
@@ -29,14 +29,21 @@ STAFF_ROLE_IDS = []
 SERVER_NAME = "SantesHub"
 EMBED_COLOR = discord.Color.from_str("#B00000")
 
+# Dosya yolları - direk main klasöründen
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-FONT_BLACK = os.path.join(ASSETS_DIR, "Poppins-Black.ttf")
-FONT_BOLD = os.path.join(ASSETS_DIR, "Poppins-Bold.ttf")
-FONT_SEMIBOLD = os.path.join(ASSETS_DIR, "Poppins-SemiBold.ttf")
-FONT_MEDIUM = os.path.join(ASSETS_DIR, "Poppins-Medium.ttf")
-WELCOME_BG = os.path.join(ASSETS_DIR, "welcome_bg.png")
-GOODBYE_BG = os.path.join(ASSETS_DIR, "goodbye_bg.png")
+FAVICON_PATH = os.path.join(BASE_DIR, "favicon.png")
+
+# Font dosyaları - eğer yoksa varsayılan font kullanılacak
+FONT_PATHS = {
+    "black": os.path.join(BASE_DIR, "Poppins-Black.ttf"),
+    "bold": os.path.join(BASE_DIR, "Poppins-Bold.ttf"),
+    "semibold": os.path.join(BASE_DIR, "Poppins-SemiBold.ttf"),
+    "medium": os.path.join(BASE_DIR, "Poppins-Medium.ttf"),
+}
+
+# Background resimleri
+WELCOME_BG = os.path.join(BASE_DIR, "welcome_bg.png")
+GOODBYE_BG = os.path.join(BASE_DIR, "goodbye_bg.png")
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 log = logging.getLogger("santeshub")
@@ -52,10 +59,80 @@ bot = commands.Bot(command_prefix=".", intents=intents)
 # Webhook cache
 webhook_cache = {}
 
+# Bot başlangıç zamanı
+bot_start_time = datetime.now(timezone.utc)
+
 
 # ============================================================
 # YARDIMCI FONKSİYONLAR
 # ============================================================
+def get_font(font_type="semibold", size=30):
+    """Font dosyasını yükler, yoksa varsayılan font kullanır."""
+    font_path = FONT_PATHS.get(font_type, FONT_PATHS["semibold"])
+    try:
+        if os.path.exists(font_path):
+            return ImageFont.truetype(font_path, size)
+        else:
+            # Varsayılan font kullan
+            return ImageFont.load_default()
+    except:
+        return ImageFont.load_default()
+
+
+def create_default_background(width=800, height=400, color=(30, 30, 40)):
+    """Varsayılan bir background oluşturur."""
+    img = Image.new('RGBA', (width, height), color)
+    draw = ImageDraw.Draw(img)
+    
+    # Gradient efekti ekle
+    for i in range(height):
+        alpha = int(255 * (1 - i / height))
+        draw.rectangle([(0, i), (width, i+1)], fill=(60, 60, 80, alpha // 2))
+    
+    # Kenarlara border ekle
+    draw.rectangle([(5, 5), (width-5, height-5)], outline=(100, 100, 120), width=2)
+    
+    return img
+
+
+def get_background(bg_path, default_color=(30, 30, 40)):
+    """Background resmini yükler, yoksa varsayılan oluşturur."""
+    if os.path.exists(bg_path):
+        try:
+            return Image.open(bg_path).convert("RGBA")
+        except:
+            pass
+    return create_default_background(color=default_color)
+
+
+def get_uptime():
+    """Botun ne kadar süredir çalıştığını hesaplar."""
+    now = datetime.now(timezone.utc)
+    delta = now - bot_start_time
+    
+    days = delta.days
+    hours, remainder = divmod(delta.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    if days > 0:
+        return f"{days}g {hours}s {minutes}d"
+    elif hours > 0:
+        return f"{hours}s {minutes}d"
+    else:
+        return f"{minutes}d {seconds}s"
+
+
+def get_favicon_attachment():
+    """Favicon dosyasını attachment olarak hazırlar."""
+    if os.path.exists(FAVICON_PATH):
+        try:
+            with open(FAVICON_PATH, 'rb') as f:
+                return discord.File(f, filename="favicon.png")
+        except Exception as e:
+            log.error(f"Favicon yüklenemedi: {e}")
+    return None
+
+
 def sanitize_channel_name(name: str) -> str:
     name = name.lower()
     name = re.sub(r"[^a-z0-9ğüşıöç\-]", "-", name)
@@ -82,7 +159,13 @@ def can_manage_ticket(member: discord.Member, channel: discord.TextChannel) -> b
 
 
 def circular_avatar(avatar_bytes: bytes, size: int = 132):
-    im = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((size, size))
+    """Avatarı yuvarlak keser."""
+    try:
+        im = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((size, size))
+    except:
+        # Avatar yüklenemezse varsayılan bir daire oluştur
+        im = Image.new('RGBA', (size, size), (100, 100, 150, 255))
+    
     mask = Image.new("L", (size, size), 0)
     d = ImageDraw.Draw(mask)
     d.ellipse((0, 0, size, size), fill=255)
@@ -91,37 +174,171 @@ def circular_avatar(avatar_bytes: bytes, size: int = 132):
     return out
 
 
-async def build_member_card(member: discord.Member, bg_path: str, headline_sub: str) -> discord.File:
-    canvas = Image.open(bg_path).convert("RGBA")
-    W, H = canvas.size
-
+async def build_member_card(member: discord.Member, bg_path: str, is_welcome: bool = True) -> discord.File:
+    """Karşılama / uğurlama banner'ını üyenin avatarı ve adıyla birlikte oluşturur."""
     try:
-        avatar_bytes = await member.display_avatar.replace(size=256, format="png").read()
-        avatar = circular_avatar(avatar_bytes, size=132)
-        canvas.alpha_composite(avatar, (W // 2 - 66, 150 - 66))
+        # Background'u yükle veya oluştur
+        if is_welcome:
+            canvas = get_background(bg_path, default_color=(20, 30, 50))
+            text_color = (255, 255, 255, 255)
+            title = "HOŞ GELDİN!"
+            title_color = (0, 255, 100, 255)
+        else:
+            canvas = get_background(bg_path, default_color=(40, 20, 30))
+            text_color = (255, 255, 255, 255)
+            title = "GÜLE GÜLE!"
+            title_color = (255, 100, 100, 255)
+        
+        W, H = canvas.size
+        
+        # Avatar ekle
+        try:
+            avatar_bytes = await member.display_avatar.replace(size=256, format="png").read()
+            avatar = circular_avatar(avatar_bytes, size=130)
+            canvas.alpha_composite(avatar, (W // 2 - 65, H // 2 - 100))
+        except Exception as e:
+            log.warning(f"Avatar eklenemedi: {e}")
+        
+        draw = ImageDraw.Draw(canvas)
+        
+        # Başlık yaz
+        try:
+            title_font = get_font("bold", 40)
+            bbox = draw.textbbox((0, 0), title, font=title_font)
+            tw = bbox[2] - bbox[0]
+            draw.text((W // 2 - tw // 2, 30), title, font=title_font, fill=title_color)
+        except:
+            pass
+        
+        # İsim yaz
+        try:
+            name_font = get_font("semibold", 28)
+            name = member.display_name
+            if len(name) > 20:
+                name = name[:19] + "…"
+            bbox = draw.textbbox((0, 0), name, font=name_font)
+            tw = bbox[2] - bbox[0]
+            draw.text((W // 2 - tw // 2, H // 2 + 60), name, font=name_font, fill=text_color)
+        except:
+            pass
+        
+        # Alt bilgi yaz
+        try:
+            info_font = get_font("medium", 16)
+            info_text = f"#{member.id} • Katılım: {member.joined_at.strftime('%d.%m.%Y') if member.joined_at else 'Bilinmiyor'}"
+            bbox = draw.textbbox((0, 0), info_text, font=info_font)
+            tw = bbox[2] - bbox[0]
+            draw.text((W // 2 - tw // 2, H - 40), info_text, font=info_font, fill=(200, 200, 200, 200))
+        except:
+            pass
+        
+        # Server ismi footer
+        try:
+            footer_font = get_font("medium", 14)
+            footer_text = f"✦ {SERVER_NAME} ✦"
+            bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
+            tw = bbox[2] - bbox[0]
+            draw.text((W // 2 - tw // 2, H - 15), footer_text, font=footer_font, fill=(150, 150, 200, 180))
+        except:
+            pass
+        
+        # Kaydet
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", quality=95)
+        buf.seek(0)
+        return discord.File(buf, filename="card.png")
+        
     except Exception as e:
-        log.warning(f"Avatar eklenemedi: {e}")
+        log.error(f"Kart oluşturma hatası: {e}")
+        # Hata durumunda basit bir kart oluştur
+        return await create_simple_card(member)
 
-    draw = ImageDraw.Draw(canvas)
-    name_font = ImageFont.truetype(FONT_SEMIBOLD, 30)
-    name = member.display_name
-    if len(name) > 22:
-        name = name[:21] + "…"
-    bbox = draw.textbbox((0, 0), name, font=name_font)
-    tw = bbox[2] - bbox[0]
-    draw.text((W // 2 - tw / 2, 335), name, font=name_font, fill=(230, 230, 230, 255))
 
+async def create_simple_card(member: discord.Member) -> discord.File:
+    """Basit bir kart oluşturur (hata durumunda)."""
+    img = Image.new('RGBA', (600, 300), (30, 30, 50))
+    draw = ImageDraw.Draw(img)
+    
+    try:
+        # Avatar ekle
+        avatar_bytes = await member.display_avatar.replace(size=128, format="png").read()
+        avatar = circular_avatar(avatar_bytes, size=80)
+        img.alpha_composite(avatar, (260, 30))
+    except:
+        pass
+    
+    # İsim yaz
+    try:
+        font = get_font("semibold", 24)
+        name = member.display_name[:20]
+        bbox = draw.textbbox((0, 0), name, font=font)
+        tw = bbox[2] - bbox[0]
+        draw.text((300 - tw // 2, 140), name, font=font, fill=(255, 255, 255))
+    except:
+        pass
+    
+    # Alt yazı
+    try:
+        font = get_font("medium", 14)
+        text = f"{SERVER_NAME} • {member.guild.name if member.guild else 'Sunucu'}"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        draw.text((300 - tw // 2, 180), text, font=font, fill=(150, 150, 200))
+    except:
+        pass
+    
     buf = io.BytesIO()
-    canvas.save(buf, format="PNG")
+    img.save(buf, format="PNG")
     buf.seek(0)
     return discord.File(buf, filename="card.png")
+
+
+# ============================================================
+# BOT DURUMU (PRESENCE)
+# ============================================================
+@tasks.loop(minutes=1)
+async def update_presence():
+    """Bot durumunu her dakika günceller."""
+    await bot.wait_until_ready()
+    
+    guild = None
+    for g in bot.guilds:
+        if g.id == 151489092657250304:  # Sunucu ID'nizi buraya yazın
+            guild = g
+            break
+    
+    if not guild:
+        guild = bot.guilds[0] if bot.guilds else None
+    
+    if guild:
+        member_count = guild.member_count
+        owner = guild.owner
+        uptime = get_uptime()
+        
+        # Bot avatarını favicon ile güncelle
+        if os.path.exists(FAVICON_PATH):
+            try:
+                with open(FAVICON_PATH, 'rb') as f:
+                    avatar_bytes = f.read()
+                await bot.user.edit(avatar=avatar_bytes)
+            except Exception as e:
+                pass
+        
+        activity = discord.Activity(
+            type=discord.ActivityType.playing,
+            name=f"SantesHub • {member_count} üye • {uptime} online 🚀"
+        )
+        
+        await bot.change_presence(
+            activity=activity,
+            status=discord.Status.online
+        )
 
 
 # ============================================================
 # WEBHOOK YÖNETİMİ
 # ============================================================
 async def get_or_create_webhook(channel: discord.TextChannel) -> Optional[discord.Webhook]:
-    """Log kanalı için webhook oluşturur veya var olanı getirir."""
     if channel.id in webhook_cache:
         try:
             webhook = await bot.fetch_webhook(webhook_cache[channel.id])
@@ -131,15 +348,16 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> Optional[discor
             pass
     
     try:
-        # Mevcut webhook'ları kontrol et
         webhooks = await channel.webhooks()
         for wh in webhooks:
             if wh.name == "SantesHub Log":
                 webhook_cache[channel.id] = wh.id
                 return wh
         
-        # Yoksa yeni webhook oluştur
-        webhook = await channel.create_webhook(name="SantesHub Log", reason="SantesHub log sistemi için oluşturuldu.")
+        webhook = await channel.create_webhook(
+            name="SantesHub Log", 
+            reason="SantesHub log sistemi için oluşturuldu."
+        )
         webhook_cache[channel.id] = webhook.id
         return webhook
     except Exception as e:
@@ -148,7 +366,6 @@ async def get_or_create_webhook(channel: discord.TextChannel) -> Optional[discor
 
 
 async def send_log(embed: discord.Embed, channel_id: int = LOG_CHANNEL_ID):
-    """Webhook üzerinden log mesajı gönderir."""
     channel = bot.get_channel(channel_id)
     if not channel:
         log.warning(f"Log kanalı bulunamadı: {channel_id}")
@@ -157,10 +374,13 @@ async def send_log(embed: discord.Embed, channel_id: int = LOG_CHANNEL_ID):
     webhook = await get_or_create_webhook(channel)
     if webhook:
         try:
-            await webhook.send(embed=embed, username="SantesHub Log", avatar_url=bot.user.display_avatar.url)
+            await webhook.send(
+                embed=embed, 
+                username="SantesHub Log", 
+                avatar_url=bot.user.display_avatar.url
+            )
         except Exception as e:
             log.error(f"Webhook ile mesaj gönderilemedi: {e}")
-            # Webhook çalışmazsa normal mesaj olarak gönder
             await channel.send(embed=embed)
 
 
@@ -197,11 +417,9 @@ async def log_member_remove(member: discord.Member):
 async def log_member_update(before: discord.Member, after: discord.Member):
     changes = []
     
-    # İsim değişikliği
     if before.display_name != after.display_name:
         changes.append(f"**İsim Değişikliği:** {before.display_name} → {after.display_name}")
     
-    # Rol değişiklikleri
     before_roles = set(before.roles)
     after_roles = set(after.roles)
     
@@ -218,7 +436,6 @@ async def log_member_update(before: discord.Member, after: discord.Member):
         if roles:
             changes.append(f"**Rol Kaldırıldı:** {', '.join(roles)}")
     
-    # Nickname değişikliği
     if before.nick != after.nick:
         old = before.nick or "Yok"
         new = after.nick or "Yok"
@@ -284,7 +501,6 @@ async def log_message_edit(before: discord.Message, after: discord.Message):
 
 
 async def log_voice_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    # Ses kanalına girdi
     if before.channel is None and after.channel is not None:
         embed = discord.Embed(
             title="🔊 Ses Kanalına Girdi",
@@ -295,7 +511,6 @@ async def log_voice_update(member: discord.Member, before: discord.VoiceState, a
         embed.set_thumbnail(url=member.display_avatar.url)
         await send_log(embed)
     
-    # Ses kanalından çıktı
     elif before.channel is not None and after.channel is None:
         embed = discord.Embed(
             title="🔇 Ses Kanalından Çıktı",
@@ -306,7 +521,6 @@ async def log_voice_update(member: discord.Member, before: discord.VoiceState, a
         embed.set_thumbnail(url=member.display_avatar.url)
         await send_log(embed)
     
-    # Ses kanalı değiştirdi
     elif before.channel is not None and after.channel is not None and before.channel != after.channel:
         embed = discord.Embed(
             title="🔀 Ses Kanalı Değiştirdi",
@@ -407,7 +621,6 @@ class TicketPanelView(discord.ui.View):
         embed.set_footer(text=f"{SERVER_NAME} • Destek Sistemi")
         await channel.send(content=interaction.user.mention, embed=embed, view=TicketControlView())
         
-        # Ticket açıldı log'u
         log_embed = discord.Embed(
             title="🎫 Yeni Ticket Açıldı",
             description=f"{interaction.user.mention} yeni bir destek talebi açtı.",
@@ -419,7 +632,6 @@ class TicketPanelView(discord.ui.View):
         log_embed.set_thumbnail(url=interaction.user.display_avatar.url)
         await send_log(log_embed)
         
-        # Kurucuya özel bildirim
         await send_ticket_notification_to_founder(interaction.user, channel)
         
         await interaction.response.send_message(f"Talebin oluşturuldu: {channel.mention}", ephemeral=True)
@@ -436,7 +648,6 @@ class TicketControlView(discord.ui.View):
             await interaction.response.send_message("Bu talebi kapatma yetkin yok.", ephemeral=True)
             return
         
-        # Ticket kapatıldı log'u
         log_embed = discord.Embed(
             title="🔒 Ticket Kapatıldı",
             description=f"{interaction.user.mention} tarafından kapatıldı.",
@@ -512,6 +723,8 @@ AUTO_REPLIES = [
      "İyidir, senden naber {mention}? 😄 Bir konuda yardım lazımsa <#{contact}> ya da destek kanalından ticket açabilirsin."),
     (r"\b(yardım|yardim)\b",
      "Yardıma mı ihtiyacın var {mention}? 🎫 Destek kanalındaki **Talep Aç** butonuyla bize ulaşabilirsin, ekibimiz en kısa sürede döner!"),
+    (r"\b(öneri|oneri|tavsiye)\b",
+     "Önerin için teşekkürler {mention}! 💡 Önerilerini <#{contact}> kanalından kurucumuza iletebilirsin."),
 ]
 AUTO_REPLY_COOLDOWN = 30
 _last_reply_at = {}
@@ -532,6 +745,19 @@ def get_auto_reply(content: str):
 async def on_ready():
     await bot.wait_until_ready()
     
+    # Bot avatarını favicon ile güncelle
+    if os.path.exists(FAVICON_PATH):
+        try:
+            with open(FAVICON_PATH, 'rb') as f:
+                avatar_bytes = f.read()
+            await bot.user.edit(avatar=avatar_bytes)
+            log.info("✅ Bot avatarı favicon ile güncellendi!")
+        except Exception as e:
+            log.warning(f"Avatar güncellenemedi: {e}")
+    
+    # Presence güncellemeyi başlat
+    update_presence.start()
+    
     # Panel'leri otomatik gönder
     await send_ticket_panel_automatically()
     await send_contact_panel_automatically()
@@ -540,18 +766,16 @@ async def on_ready():
     bot.add_view(TicketControlView())
     bot.add_view(ContactFounderView())
     
-    log.info(f"{bot.user} olarak giriş yapıldı!")
-    log.info(f"Bot {len(bot.guilds)} sunucuda aktif.")
+    log.info(f"✅ {bot.user} olarak giriş yapıldı!")
+    log.info(f"📊 {len(bot.guilds)} sunucuda aktif.")
 
 
 async def send_ticket_panel_automatically():
-    """Ticket panelini otomatik gönder."""
     for guild in bot.guilds:
         channel = guild.get_channel(TICKET_CHANNEL_ID)
         if channel is None:
             continue
         
-        # Kanalda zaten panel var mı kontrol et
         try:
             async for message in channel.history(limit=50):
                 if message.author == bot.user and message.embeds:
@@ -585,13 +809,11 @@ async def send_ticket_panel_automatically():
 
 
 async def send_contact_panel_automatically():
-    """İletişim panelini otomatik gönder."""
     for guild in bot.guilds:
         channel = guild.get_channel(KURUCU_DESTEK_CHANNEL_ID)
         if channel is None:
             continue
         
-        # Kanalda zaten panel var mı kontrol et
         try:
             async for message in channel.history(limit=50):
                 if message.author == bot.user and message.embeds:
@@ -624,39 +846,39 @@ async def send_contact_panel_automatically():
 # ============================================================
 @bot.event
 async def on_member_join(member: discord.Member):
-    # Karşılama mesajı
     channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
     if channel:
         try:
-            file = await build_member_card(member, WELCOME_BG, "")
+            # Kart oluştur
+            file = await build_member_card(member, WELCOME_BG, is_welcome=True)
             embed = discord.Embed(color=EMBED_COLOR)
             embed.set_image(url="attachment://card.png")
             embed.set_footer(text=f"Sunucumuz artık {member.guild.member_count} kişi! 🚀")
             await channel.send(content=f"{member.mention} Hoşgeldin! 🎉", embed=embed, file=file)
+            log.info(f"✅ {member} için karşılama kartı gönderildi!")
         except Exception as e:
             log.error(f"Karşılama kartı gönderilemedi: {e}")
+            # Hata durumunda basit mesaj gönder
             await channel.send(f"{member.mention} SantesHub'a hoşgeldin! 🎉 Şu an {member.guild.member_count} kişiyiz. 🚀")
     
-    # Log
     await log_member_join(member)
 
 
 @bot.event
 async def on_member_remove(member: discord.Member):
-    # Uğurlama mesajı
     channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
     if channel:
         try:
-            file = await build_member_card(member, GOODBYE_BG, "")
+            file = await build_member_card(member, GOODBYE_BG, is_welcome=False)
             embed = discord.Embed(color=EMBED_COLOR)
             embed.set_image(url="attachment://card.png")
             embed.set_footer(text=f"Şu an {member.guild.member_count} kişi kaldık.")
             await channel.send(content=f"**{member}** aramızdan ayrıldı. 👋", embed=embed, file=file)
+            log.info(f"✅ {member} için uğurlama kartı gönderildi!")
         except Exception as e:
             log.error(f"Uğurlama kartı gönderilemedi: {e}")
             await channel.send(f"**{member}** aramızdan ayrıldı. 👋")
     
-    # Log
     await log_member_remove(member)
 
 
@@ -673,7 +895,6 @@ async def on_message(message: discord.Message):
     if message.author.bot or message.guild is None:
         return
 
-    # Otomatik cevaplar
     reply = get_auto_reply(message.content)
     if reply:
         now = datetime.now(timezone.utc).timestamp()
@@ -710,7 +931,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 @bot.command(name="panel")
 @commands.has_permissions(administrator=True)
 async def panel_command(ctx):
-    """Ticket panelini manuel gönderir."""
     await send_ticket_panel_automatically()
     await ctx.send("✅ Ticket paneli gönderildi!", delete_after=5)
 
@@ -718,7 +938,6 @@ async def panel_command(ctx):
 @bot.command(name="iletisim")
 @commands.has_permissions(administrator=True)
 async def iletisim_command(ctx):
-    """İletişim panelini manuel gönderir."""
     await send_contact_panel_automatically()
     await ctx.send("✅ İletişim paneli gönderildi!", delete_after=5)
 
@@ -726,7 +945,6 @@ async def iletisim_command(ctx):
 @bot.command(name="temizle")
 @commands.has_permissions(manage_messages=True)
 async def temizle_command(ctx, miktar: int):
-    """Belirtilen sayıda mesajı siler."""
     if miktar < 1 or miktar > 100:
         await ctx.send("❌ 1-100 arası bir sayı girin!", delete_after=5)
         return
@@ -739,12 +957,80 @@ async def temizle_command(ctx, miktar: int):
 
 @bot.command(name="ping")
 async def ping_command(ctx):
-    """Bot gecikmesini gösterir."""
     latency = round(bot.latency * 1000)
-    await ctx.send(f"🏓 Pong! {latency}ms")
+    uptime = get_uptime()
+    embed = discord.Embed(
+        title="🏓 Pong!",
+        description=f"**Gecikme:** {latency}ms\n**Çalışma Süresi:** {uptime}",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="stats")
+async def stats_command(ctx):
+    """Sunucu ve bot istatistiklerini gösterir."""
+    guild = ctx.guild
+    embed = discord.Embed(
+        title=f"📊 {SERVER_NAME} İstatistikler",
+        color=EMBED_COLOR,
+        timestamp=datetime.now(timezone.utc)
+    )
+    
+    embed.add_field(name="👥 Toplam Üye", value=guild.member_count, inline=True)
+    embed.add_field(name="👤 Çevrimiçi", value=len([m for m in guild.members if m.status != discord.Status.offline]), inline=True)
+    embed.add_field(name="📅 Sunucu Kuruluş", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
+    
+    embed.add_field(name="⏱️ Bot Çalışma", value=get_uptime(), inline=True)
+    embed.add_field(name="🏓 Ping", value=f"{round(bot.latency * 1000)}ms", inline=True)
+    embed.add_field(name="👑 Sunucu Sahibi", value=guild.owner.mention, inline=True)
+    
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    embed.set_footer(text=f"{SERVER_NAME} • {bot.user.name}")
+    
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="yardim")
+async def yardim_command(ctx):
+    """Bot komutlarını gösterir."""
+    embed = discord.Embed(
+        title=f"📚 {SERVER_NAME} Bot Komutları",
+        description="Botu kullanmak için aşağıdaki komutları kullanabilirsin.",
+        color=EMBED_COLOR
+    )
+    
+    embed.add_field(
+        name="📋 Genel Komutlar",
+        value=(
+            "`.ping` - Bot gecikmesini gösterir\n"
+            "`.stats` - Sunucu istatistiklerini gösterir\n"
+            "`.yardim` - Bu menüyü gösterir"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔧 Yetkili Komutları",
+        value=(
+            "`.panel` - Ticket panelini gönderir (Admin)\n"
+            "`.iletisim` - İletişim panelini gönderir (Admin)\n"
+            "`.temizle <sayı>` - Mesajları siler (Manage Messages)"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🎫 Ticket Sistemi",
+        value="Destek kanalındaki **Talep Aç** butonuna tıklayarak ticket oluşturabilirsin.",
+        inline=False
+    )
+    
+    embed.set_footer(text=f"{SERVER_NAME} • Yardım Menüsü")
+    await ctx.send(embed=embed)
 
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN ortam değişkeni ayarlanmamış!")
+        raise SystemExit("❌ BOT_TOKEN ortam değişkeni ayarlanmamış!")
     bot.run(BOT_TOKEN)
