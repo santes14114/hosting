@@ -993,29 +993,65 @@ async def lookup_command(ctx, member: discord.Member):
 
 
 # ============================================================
-# DM KOMUTU
+# DM KOMUTU - ID ve Etiket Desteği
 # ============================================================
 @bot.command(name="dm")
 @commands.check(yetkili_kontrol)
-async def dm_command(ctx, member: discord.Member, *, mesaj: str):
-    """Belirtilen kişiye DM gönderir."""
+async def dm_command(ctx, hedef: str, *, mesaj: str):
+    """Belirtilen kişiye DM gönderir. (ID veya @etiket kullanabilirsin)"""
     try:
+        member = None
+        
+        # ID ile kontrol et
+        if hedef.isdigit():
+            member = ctx.guild.get_member(int(hedef))
+            if not member:
+                try:
+                    member = await bot.fetch_user(int(hedef))
+                except:
+                    pass
+        
+        # Etiket ile kontrol et (mention veya isim)
+        if not member:
+            # Mention ile dene
+            if hedef.startswith('<@') and hedef.endswith('>'):
+                user_id = int(re.sub(r'[<@!>]', '', hedef))
+                member = ctx.guild.get_member(user_id)
+                if not member:
+                    try:
+                        member = await bot.fetch_user(user_id)
+                    except:
+                        pass
+            
+            # İsim ile dene
+            if not member:
+                for m in ctx.guild.members:
+                    if m.name.lower() == hedef.lower() or (m.nick and m.nick.lower() == hedef.lower()):
+                        member = m
+                        break
+        
+        if not member:
+            await ctx.send("❌ Kullanıcı bulunamadı! Lütfen geçerli bir ID veya @etiket girin.")
+            return
+        
+        # Mesajı gönder
         await member.send(f"# {mesaj}")
         
         embed = discord.Embed(
             title="✅ DM Gönderildi",
-            description=f"{member.mention} kişisine mesaj gönderildi!",
+            description=f"{member.mention} ({member.id}) kişisine mesaj gönderildi!",
             color=discord.Color.green(),
             timestamp=datetime.now(timezone.utc)
         )
         embed.add_field(name="Mesaj", value=f"```\n{mesaj}\n```", inline=False)
         embed.add_field(name="Gönderen", value=ctx.author.mention, inline=True)
+        embed.add_field(name="Hedef ID", value=member.id, inline=True)
         embed.set_footer(text=f"{SERVER_NAME} • DM Sistemi")
         await ctx.send(embed=embed)
         
         log_embed = discord.Embed(
             title="📨 DM Gönderildi",
-            description=f"{ctx.author} → {member}",
+            description=f"{ctx.author} → {member} ({member.id})",
             color=discord.Color.blue(),
             timestamp=datetime.now(timezone.utc)
         )
@@ -1026,8 +1062,7 @@ async def dm_command(ctx, member: discord.Member, *, mesaj: str):
         await ctx.send("❌ Bu kişi DM'lerini kapatmış veya beni engellemiş!")
     except Exception as e:
         await ctx.send(f"❌ DM gönderilemedi: {e}")
-
-
+        
 # ============================================================
 # GENEL KOMUTLAR
 # ============================================================
