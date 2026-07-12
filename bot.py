@@ -57,7 +57,7 @@ intents.members = True
 intents.message_content = True
 intents.guilds = True
 intents.voice_states = True
-intents.moderation = True  # Düzeltildi: moderations -> moderation
+intents.moderation = True
 
 bot = commands.Bot(command_prefix=".", intents=intents)
 
@@ -69,7 +69,6 @@ bot_start_time = datetime.now(timezone.utc)
 # YARDIMCI FONKSİYONLAR
 # ============================================================
 def yetkili_mi(ctx):
-    """Kullanıcının yetkili rollerinden birine sahip olup olmadığını kontrol eder."""
     if ctx.author.guild_permissions.administrator:
         return True
     for role_id in YETKILI_ROLLER:
@@ -262,7 +261,7 @@ async def create_simple_card(member: discord.Member) -> discord.File:
 
 
 # ============================================================
-# BOT DURUMU - YILDIZLI VERSİYON
+# BOT DURUMU - ALT ALTA 5 SATIR
 # ============================================================
 @tasks.loop(minutes=1)
 async def update_presence():
@@ -273,7 +272,7 @@ async def update_presence():
         member_count = guild.member_count
         uptime = get_uptime()
         
-        # Alt alta 4 satır - Nokta ve yıldız karışımı
+        # Alt alta 5 satır - Nokta, çizgi ve yıldız karışımı
         activity = discord.Activity(
             type=discord.ActivityType.playing,
             name=(
@@ -506,10 +505,8 @@ _last_reply_at = {}
 async def on_ready():
     await bot.wait_until_ready()
     
-    # Presence güncellemeyi başlat
     update_presence.start()
     
-    # Panel'leri otomatik gönder
     await send_ticket_panel_automatically()
     await send_contact_panel_automatically()
     
@@ -656,7 +653,6 @@ def yetkili_kontrol(ctx):
 @bot.command(name="ban")
 @commands.check(yetkili_kontrol)
 async def ban_command(ctx, member: discord.Member, *, reason: str = "Belirtilmedi"):
-    """Üyeyi banlar."""
     try:
         await member.ban(reason=reason)
         embed = discord.Embed(
@@ -685,7 +681,6 @@ async def ban_command(ctx, member: discord.Member, *, reason: str = "Belirtilmed
 @bot.command(name="kick")
 @commands.check(yetkili_kontrol)
 async def kick_command(ctx, member: discord.Member, *, reason: str = "Belirtilmedi"):
-    """Üyeyi kickler."""
     try:
         await member.kick(reason=reason)
         embed = discord.Embed(
@@ -714,7 +709,6 @@ async def kick_command(ctx, member: discord.Member, *, reason: str = "Belirtilme
 @bot.command(name="sescek")
 @commands.check(yetkili_kontrol)
 async def sescek_command(ctx, channel_id: int):
-    """Ses kanalına girer."""
     try:
         channel = bot.get_channel(channel_id)
         if not channel or not isinstance(channel, discord.VoiceChannel):
@@ -733,7 +727,6 @@ async def sescek_command(ctx, channel_id: int):
 @bot.command(name="mute")
 @commands.check(yetkili_kontrol)
 async def mute_command(ctx, member: discord.Member, sure: int = 60, *, sebep: str = "Belirtilmedi"):
-    """Üyeyi susturur (timeout)."""
     try:
         duration = timedelta(minutes=sure)
         await member.timeout(duration, reason=sebep)
@@ -763,7 +756,6 @@ async def mute_command(ctx, member: discord.Member, sure: int = 60, *, sebep: st
 @bot.command(name="unmute")
 @commands.check(yetkili_kontrol)
 async def unmute_command(ctx, member: discord.Member):
-    """Üyenin susturmasını kaldırır."""
     try:
         await member.timeout(None)
         embed = discord.Embed(
@@ -790,7 +782,6 @@ async def unmute_command(ctx, member: discord.Member):
 @bot.command(name="temizle")
 @commands.check(yetkili_kontrol)
 async def temizle_command(ctx, miktar: int):
-    """Mesajları hızlıca siler."""
     if miktar < 1 or miktar > 1000:
         await ctx.send("❌ 1-1000 arası bir sayı girin!")
         return
@@ -807,7 +798,6 @@ async def temizle_command(ctx, miktar: int):
 @bot.command(name="ticketpanel")
 @commands.check(yetkili_kontrol)
 async def ticketpanel_command(ctx):
-    """Ticket panelini gönderir."""
     await send_ticket_panel_automatically()
     await ctx.send("✅ Ticket paneli gönderildi!", delete_after=3)
 
@@ -815,7 +805,6 @@ async def ticketpanel_command(ctx):
 @bot.command(name="kurucupanel")
 @commands.check(yetkili_kontrol)
 async def kurucupanel_command(ctx):
-    """Kurucu iletişim panelini gönderir."""
     await send_contact_panel_automatically()
     await ctx.send("✅ Kurucu iletişim paneli gönderildi!", delete_after=3)
 
@@ -823,14 +812,13 @@ async def kurucupanel_command(ctx):
 @bot.command(name="webhookekle")
 @commands.check(yetkili_kontrol)
 async def webhookekle_command(ctx, channel_id: int):
-    """Belirtilen kanala webhook ekler."""
     try:
         channel = bot.get_channel(channel_id)
         if not channel:
             await ctx.send("❌ Geçersiz kanal ID'si!")
             return
         
-        webhook = await channel.create_webhook(name="SantesHub Webhook")
+        await channel.create_webhook(name="SantesHub Webhook")
         
         embed = discord.Embed(
             title="✅ Webhook Eklendi",
@@ -855,7 +843,6 @@ async def webhookekle_command(ctx, channel_id: int):
 @bot.command(name="rolver")
 @commands.check(yetkili_kontrol)
 async def rolver_command(ctx, member: discord.Member, role: discord.Role):
-    """Üyeye rol verir."""
     try:
         await member.add_roles(role)
         embed = discord.Embed(
@@ -882,7 +869,6 @@ async def rolver_command(ctx, member: discord.Member, role: discord.Role):
 @bot.command(name="rolal")
 @commands.check(yetkili_kontrol)
 async def rolal_command(ctx, member: discord.Member, role: discord.Role):
-    """Üyeden rol alır."""
     try:
         await member.remove_roles(role)
         embed = discord.Embed(
@@ -906,34 +892,9 @@ async def rolal_command(ctx, member: discord.Member, role: discord.Role):
         await ctx.send(f"❌ Rol alınamadı: {e}")
 
 
-@bot.command(name="sunucu")
-async def sunucu_command(ctx):
-    """Sunucu bilgilerini gösterir."""
-    guild = ctx.guild
-    embed = discord.Embed(
-        title=f"🏰 {guild.name}",
-        color=EMBED_COLOR,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
-    embed.add_field(name="👑 Sahip", value=guild.owner.mention, inline=True)
-    embed.add_field(name="👥 Üye Sayısı", value=guild.member_count, inline=True)
-    embed.add_field(name="📅 Kuruluş", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
-    embed.add_field(name="📢 Kanal Sayısı", value=len(guild.channels), inline=True)
-    embed.add_field(name="🎭 Rol Sayısı", value=len(guild.roles), inline=True)
-    embed.add_field(name="💬 Boost", value=guild.premium_subscription_count or 0, inline=True)
-    embed.set_footer(text=f"{SERVER_NAME} • Sunucu Bilgileri")
-    await ctx.send(embed=embed)
-
-
-# ============================================================
-# LOOKUP KOMUTU - KULLANICI BİLGİLERİ
-# ============================================================
 @bot.command(name="lookup")
 @commands.check(yetkili_kontrol)
 async def lookup_command(ctx, member: discord.Member):
-    """Kullanıcının profil bilgilerini gösterir."""
-    
     embed = discord.Embed(
         title=f"🔍 Kullanıcı Bilgileri",
         description=f"**{member.display_name}** kullanıcısının bilgileri",
@@ -943,23 +904,9 @@ async def lookup_command(ctx, member: discord.Member):
     
     embed.set_thumbnail(url=member.display_avatar.url)
     
-    embed.add_field(
-        name="👤 Kullanıcı Adı",
-        value=member.name,
-        inline=True
-    )
-    
-    embed.add_field(
-        name="📛 Takma Adı",
-        value=member.nick if member.nick else "Yok",
-        inline=True
-    )
-    
-    embed.add_field(
-        name="🆔 ID",
-        value=member.id,
-        inline=True
-    )
+    embed.add_field(name="👤 Kullanıcı Adı", value=member.name, inline=True)
+    embed.add_field(name="📛 Takma Adı", value=member.nick if member.nick else "Yok", inline=True)
+    embed.add_field(name="🆔 ID", value=member.id, inline=True)
     
     embed.add_field(
         name="📅 Hesap Oluşturma",
@@ -973,11 +920,7 @@ async def lookup_command(ctx, member: discord.Member):
         inline=True
     )
     
-    embed.add_field(
-        name="🟢 Durum",
-        value=str(member.status).title(),
-        inline=True
-    )
+    embed.add_field(name="🟢 Durum", value=str(member.status).title(), inline=True)
     
     aktivite = "Yok"
     if member.activity:
@@ -992,11 +935,7 @@ async def lookup_command(ctx, member: discord.Member):
         else:
             aktivite = member.activity.name
     
-    embed.add_field(
-        name="🎯 Aktivite",
-        value=aktivite,
-        inline=True
-    )
+    embed.add_field(name="🎯 Aktivite", value=aktivite, inline=True)
     
     roller = [f"{role.mention}" for role in member.roles if role != ctx.guild.default_role]
     if roller:
@@ -1006,11 +945,7 @@ async def lookup_command(ctx, member: discord.Member):
             inline=False
         )
     else:
-        embed.add_field(
-            name="🎭 Roller",
-            value="Hiç rolü yok",
-            inline=False
-        )
+        embed.add_field(name="🎭 Roller", value="Hiç rolü yok", inline=False)
     
     yetkiler = []
     if member.guild_permissions.administrator:
@@ -1039,23 +974,11 @@ async def lookup_command(ctx, member: discord.Member):
         yetkiler.append("🪝 Webhook Yönetimi")
     
     if yetkiler:
-        embed.add_field(
-            name="🛡️ Yetkiler",
-            value="\n".join(yetkiler),
-            inline=False
-        )
+        embed.add_field(name="🛡️ Yetkiler", value="\n".join(yetkiler), inline=False)
     else:
-        embed.add_field(
-            name="🛡️ Yetkiler",
-            value="Özel bir yetkisi yok",
-            inline=False
-        )
+        embed.add_field(name="🛡️ Yetkiler", value="Özel bir yetkisi yok", inline=False)
     
-    embed.add_field(
-        name="🤖 Bot mu?",
-        value="Evet ✅" if member.bot else "Hayır ❌",
-        inline=True
-    )
+    embed.add_field(name="🤖 Bot mu?", value="Evet ✅" if member.bot else "Hayır ❌", inline=True)
     
     if member.premium_since:
         embed.add_field(
@@ -1070,12 +993,27 @@ async def lookup_command(ctx, member: discord.Member):
     await ctx.send("✅ Bilgiler DM'ine gönderildi!", delete_after=3)
 
 
-# ============================================================
-# GENEL KOMUTLAR
-# ============================================================
+@bot.command(name="sunucu")
+async def sunucu_command(ctx):
+    guild = ctx.guild
+    embed = discord.Embed(
+        title=f"🏰 {guild.name}",
+        color=EMBED_COLOR,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    embed.add_field(name="👑 Sahip", value=guild.owner.mention, inline=True)
+    embed.add_field(name="👥 Üye Sayısı", value=guild.member_count, inline=True)
+    embed.add_field(name="📅 Kuruluş", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
+    embed.add_field(name="📢 Kanal Sayısı", value=len(guild.channels), inline=True)
+    embed.add_field(name="🎭 Rol Sayısı", value=len(guild.roles), inline=True)
+    embed.add_field(name="💬 Boost", value=guild.premium_subscription_count or 0, inline=True)
+    embed.set_footer(text=f"{SERVER_NAME} • Sunucu Bilgileri")
+    await ctx.send(embed=embed)
+
+
 @bot.command(name="ping")
 async def ping_command(ctx):
-    """Bot gecikmesini gösterir."""
     latency = round(bot.latency * 1000)
     uptime = get_uptime()
     embed = discord.Embed(
@@ -1088,7 +1026,6 @@ async def ping_command(ctx):
 
 @bot.command(name="yardim")
 async def yardim_command(ctx):
-    """Bot komutlarını gösterir."""
     embed = discord.Embed(
         title=f"📚 {SERVER_NAME} Bot Komutları",
         description="**Prefix:** `.`",
