@@ -57,7 +57,7 @@ intents.members = True
 intents.message_content = True
 intents.guilds = True
 intents.voice_states = True
-intents.moderations = True
+intents.moderation = True  # Düzeltildi: moderations -> moderation
 
 bot = commands.Bot(command_prefix=".", intents=intents)
 
@@ -934,7 +934,6 @@ async def sunucu_command(ctx):
 async def lookup_command(ctx, member: discord.Member):
     """Kullanıcının profil bilgilerini gösterir."""
     
-    # Kullanıcı bilgileri
     embed = discord.Embed(
         title=f"🔍 Kullanıcı Bilgileri",
         description=f"**{member.display_name}** kullanıcısının bilgileri",
@@ -980,7 +979,6 @@ async def lookup_command(ctx, member: discord.Member):
         inline=True
     )
     
-    # Aktivite bilgisi
     aktivite = "Yok"
     if member.activity:
         if member.activity.type == discord.ActivityType.playing:
@@ -1000,7 +998,6 @@ async def lookup_command(ctx, member: discord.Member):
         inline=True
     )
     
-    # Roller
     roller = [f"{role.mention}" for role in member.roles if role != ctx.guild.default_role]
     if roller:
         embed.add_field(
@@ -1015,7 +1012,6 @@ async def lookup_command(ctx, member: discord.Member):
             inline=False
         )
     
-    # Yetki bilgileri
     yetkiler = []
     if member.guild_permissions.administrator:
         yetkiler.append("👑 Yönetici")
@@ -1055,14 +1051,12 @@ async def lookup_command(ctx, member: discord.Member):
             inline=False
         )
     
-    # Bot mu?
     embed.add_field(
         name="🤖 Bot mu?",
         value="Evet ✅" if member.bot else "Hayır ❌",
         inline=True
     )
     
-    # Boost
     if member.premium_since:
         embed.add_field(
             name="💎 Boost Süresi",
@@ -1072,7 +1066,6 @@ async def lookup_command(ctx, member: discord.Member):
     
     embed.set_footer(text=f"{SERVER_NAME} • Sadece Yetkililer Görebilir")
     
-    # Sadece komutu kullanan kişi görebilsin
     await ctx.author.send(embed=embed)
     await ctx.send("✅ Bilgiler DM'ine gönderildi!", delete_after=3)
 
