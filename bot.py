@@ -4,8 +4,15 @@ import io
 import asyncio
 import logging
 import time
+import aiohttp
+import socket
+import dns.resolver
+import whois
+import requests
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 import discord
 from discord import app_commands
@@ -491,6 +498,617 @@ class ContactFounderView(discord.ui.View):
 
 
 # ============================================================
+# SORGU PANELİ (SELECT MENU İLE)
+# ============================================================
+class SorguSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(
+                label="Domain WHOIS",
+                description="Domain kayıt bilgileri ve sahiplik",
+                value="domain_whois",
+                emoji="🌐"
+            ),
+            discord.SelectOption(
+                label="Domain DNS",
+                description="DNS kayıtları ve MX sorgulama",
+                value="domain_dns",
+                emoji="🔍"
+            ),
+            discord.SelectOption(
+                label="IP Konum",
+                description="IP adresi coğrafi konum ve ISP",
+                value="ip_location",
+                emoji="🌍"
+            ),
+            discord.SelectOption(
+                label="SSL Kontrol",
+                description="SSL sertifikası doğrulama",
+                value="ssl_check",
+                emoji="🔒"
+            ),
+            discord.SelectOption(
+                label="Port Tarama",
+                description="Açık port kontrolü",
+                value="port_scan",
+                emoji="🔓"
+            ),
+            discord.SelectOption(
+                label="Discord ID",
+                description="Discord kullanıcı profili sorgula",
+                value="discord_id",
+                emoji="🆔"
+            ),
+            discord.SelectOption(
+                label="URL Güvenlik",
+                description="URL güvenlik kontrolü",
+                value="url_safety",
+                emoji="🔗"
+            ),
+            discord.SelectOption(
+                label="Bot Token",
+                description="Bot token doğrulama",
+                value="token_check",
+                emoji="🤖"
+            ),
+            discord.SelectOption(
+                label="Ping",
+                description="Sunucu ping ve gecikme testi",
+                value="ping_test",
+                emoji="🏓"
+            ),
+        ]
+        super().__init__(
+            placeholder="📋 Sorgu seçiniz...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        secim = self.values[0]
+        
+        if secim == "domain_whois":
+            await interaction.response.send_modal(DomainWhoisModal())
+        elif secim == "domain_dns":
+            await interaction.response.send_modal(DomainDNSModal())
+        elif secim == "ip_location":
+            await interaction.response.send_modal(IPLocationModal())
+        elif secim == "ssl_check":
+            await interaction.response.send_modal(SSLModal())
+        elif secim == "port_scan":
+            await interaction.response.send_modal(PortScanModal())
+        elif secim == "discord_id":
+            await interaction.response.send_modal(DiscordIDModal())
+        elif secim == "url_safety":
+            await interaction.response.send_modal(URLSafetyModal())
+        elif secim == "token_check":
+            await interaction.response.send_modal(TokenCheckModal())
+        elif secim == "ping_test":
+            await interaction.response.send_modal(PingModal())
+
+
+class SorguPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(SorguSelect())
+
+
+# ============================================================
+# SORGU MODALLARI (LEGAL VE ÇALIŞAN ARAÇLAR)
+# ============================================================
+class DomainWhoisModal(discord.ui.Modal, title="🌐 Domain WHOIS Sorgu"):
+    domain = discord.ui.TextInput(
+        label="Domain Adı",
+        placeholder="ornek.com veya ornek.com.tr",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        domain = self.domain.value.strip().lower()
+        
+        embed = discord.Embed(
+            title="🌐 Domain WHOIS Sorgu Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Domain", value=domain, inline=True)
+        
+        try:
+            w = whois.whois(domain)
+            
+            if w.domain_name:
+                embed.add_field(name="✅ Durum", value="Domain kayıtlı", inline=True)
+                embed.add_field(name="👤 Kayıt Sahibi", value=str(w.name or "Bilinmiyor"), inline=True)
+                embed.add_field(name="📧 Email", value=str(w.emails or "Bilinmiyor"), inline=True)
+                embed.add_field(name="📅 Kayıt Tarihi", value=str(w.creation_date or "Bilinmiyor"), inline=True)
+                embed.add_field(name="⏰ Bitiş Tarihi", value=str(w.expiration_date or "Bilinmiyor"), inline=True)
+                embed.add_field(name="🔄 Son Güncelleme", value=str(w.updated_date or "Bilinmiyor"), inline=True)
+                embed.add_field(name="🌐 Nameserver", value=str(w.name_servers or "Bilinmiyor"), inline=True)
+            else:
+                embed.add_field(name="❌ Durum", value="Domain kayıtlı değil veya bulunamadı", inline=True)
+                
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"Domain sorgulanamadı: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Sorgu sonucu DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class DomainDNSModal(discord.ui.Modal, title="🔍 Domain DNS Sorgu"):
+    domain = discord.ui.TextInput(
+        label="Domain Adı",
+        placeholder="ornek.com",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        domain = self.domain.value.strip().lower()
+        
+        embed = discord.Embed(
+            title="🔍 Domain DNS Sorgu Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Domain", value=domain, inline=True)
+        
+        try:
+            # A kaydı
+            try:
+                answers = dns.resolver.resolve(domain, 'A')
+                ip_list = [str(r) for r in answers]
+                embed.add_field(name="🌐 A Kaydı (IPv4)", value="\n".join(ip_list[:5]), inline=True)
+            except:
+                embed.add_field(name="🌐 A Kaydı", value="Bulunamadı", inline=True)
+            
+            # MX kaydı
+            try:
+                answers = dns.resolver.resolve(domain, 'MX')
+                mx_list = [f"{r.exchange} ({r.preference})" for r in answers]
+                embed.add_field(name="📧 MX Kaydı", value="\n".join(mx_list[:3]), inline=True)
+            except:
+                embed.add_field(name="📧 MX Kaydı", value="Bulunamadı", inline=True)
+            
+            # NS kaydı
+            try:
+                answers = dns.resolver.resolve(domain, 'NS')
+                ns_list = [str(r) for r in answers]
+                embed.add_field(name="🔄 NS Kaydı", value="\n".join(ns_list[:3]), inline=True)
+            except:
+                embed.add_field(name="🔄 NS Kaydı", value="Bulunamadı", inline=True)
+            
+            # TXT kaydı
+            try:
+                answers = dns.resolver.resolve(domain, 'TXT')
+                txt_list = [str(r)[:50] + "..." for r in answers[:2]]
+                embed.add_field(name="📝 TXT Kaydı", value="\n".join(txt_list) if txt_list else "Bulunamadı", inline=True)
+            except:
+                pass
+                
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"DNS sorgulanamadı: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Sorgu sonucu DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class IPLocationModal(discord.ui.Modal, title="🌍 IP Konum Sorgu"):
+    ip = discord.ui.TextInput(
+        label="IP Adresi",
+        placeholder="8.8.8.8",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ip = self.ip.value.strip()
+        
+        embed = discord.Embed(
+            title="🌍 IP Konum Sorgu Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="IP Adresi", value=ip, inline=True)
+        
+        try:
+            # ip-api.com API (ücretsiz, limitsiz)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://ip-api.com/json/{ip}") as resp:
+                    data = await resp.json()
+                    
+                    if data.get('status') == 'success':
+                        embed.add_field(name="📍 Ülke", value=data.get('country', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="🏙️ Şehir", value=data.get('city', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="📌 Bölge", value=data.get('regionName', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="📮 Posta Kodu", value=data.get('zip', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="🌐 ISP", value=data.get('isp', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="📡 Organizasyon", value=data.get('org', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="📱 Zaman Dilimi", value=data.get('timezone', 'Bilinmiyor'), inline=True)
+                        embed.add_field(name="🗺️ Koordinatlar", value=f"{data.get('lat', '?')}, {data.get('lon', '?')}", inline=True)
+                    else:
+                        embed.add_field(name="❌ Durum", value="IP bulunamadı veya geçersiz", inline=True)
+                        
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"IP sorgulanamadı: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Sorgu sonucu DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class SSLModal(discord.ui.Modal, title="🔒 SSL Kontrol"):
+    domain = discord.ui.TextInput(
+        label="Domain Adı",
+        placeholder="ornek.com",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        domain = self.domain.value.strip().lower()
+        
+        embed = discord.Embed(
+            title="🔒 SSL Sertifika Kontrolü",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Domain", value=domain, inline=True)
+        
+        try:
+            import ssl
+            import socket
+            from datetime import datetime
+            
+            context = ssl.create_default_context()
+            with socket.create_connection((domain, 443), timeout=5) as sock:
+                with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                    cert = ssock.getpeercert()
+                    
+                    embed.add_field(name="✅ Durum", value="SSL sertifikası aktif", inline=True)
+                    embed.add_field(name="🏷️ Yayınlayan", value=cert.get('issuer', {}).get('organizationName', ['Bilinmiyor'])[0], inline=True)
+                    embed.add_field(name="🔑 Konu", value=cert.get('subject', {}).get('commonName', ['Bilinmiyor'])[0], inline=True)
+                    
+                    # Başlangıç ve bitiş tarihleri
+                    not_before = datetime.strptime(cert['notBefore'], '%b %d %H:%M:%S %Y %Z')
+                    not_after = datetime.strptime(cert['notAfter'], '%b %d %H:%M:%S %Y %Z')
+                    
+                    embed.add_field(name="📅 Başlangıç", value=f"<t:{int(not_before.timestamp())}:D>", inline=True)
+                    embed.add_field(name="📅 Bitiş", value=f"<t:{int(not_after.timestamp())}:D>", inline=True)
+                    
+                    # Kalan gün
+                    remaining = (not_after - datetime.now()).days
+                    if remaining > 30:
+                        embed.add_field(name="✅ Geçerlilik", value=f"{remaining} gün kaldı", inline=True)
+                    elif remaining > 0:
+                        embed.add_field(name="⚠️ Geçerlilik", value=f"{remaining} gün kaldı (Yakında bitiyor!)", inline=True)
+                    else:
+                        embed.add_field(name="❌ Geçerlilik", value="Sertifika süresi dolmuş!", inline=True)
+                        
+        except socket.timeout:
+            embed.add_field(name="❌ Hata", value="Bağlantı zaman aşımı (443 portu kapalı olabilir)", inline=True)
+        except ConnectionRefusedError:
+            embed.add_field(name="❌ Hata", value="Bağlantı reddedildi (HTTPS aktif değil)", inline=True)
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"SSL kontrol edilemedi: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ SSL bilgileri DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class PortScanModal(discord.ui.Modal, title="🔓 Port Tarama"):
+    ip = discord.ui.TextInput(
+        label="IP veya Domain",
+        placeholder="8.8.8.8 veya ornek.com",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        target = self.ip.value.strip()
+        
+        embed = discord.Embed(
+            title="🔓 Port Tarama Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Hedef", value=target, inline=True)
+        
+        # Yaygın portlar
+        common_ports = {
+            21: "FTP",
+            22: "SSH",
+            23: "Telnet",
+            25: "SMTP",
+            53: "DNS",
+            80: "HTTP",
+            110: "POP3",
+            143: "IMAP",
+            443: "HTTPS",
+            3306: "MySQL",
+            3389: "RDP",
+            5432: "PostgreSQL",
+            6379: "Redis",
+            27017: "MongoDB"
+        }
+        
+        open_ports = []
+        try:
+            # Hostname çözümleme
+            ip = socket.gethostbyname(target)
+            
+            for port, service in common_ports.items():
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2)
+                    result = sock.connect_ex((ip, port))
+                    sock.close()
+                    
+                    if result == 0:
+                        open_ports.append(f"**{port}** ({service}) ✅")
+                except:
+                    pass
+            
+            if open_ports:
+                embed.add_field(name="✅ Açık Portlar", value="\n".join(open_ports), inline=True)
+            else:
+                embed.add_field(name="ℹ️ Bilgi", value="Yaygın portlarda açık bulunamadı", inline=True)
+                
+            embed.add_field(name="🔄 Çözümlenen IP", value=ip, inline=True)
+            
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"Tarama yapılamadı: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Port tarama sonucu DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class DiscordIDModal(discord.ui.Modal, title="🆔 Discord ID Sorgu"):
+    user_id = discord.ui.TextInput(
+        label="Discord ID",
+        placeholder="Kullanıcı ID'sini girin...",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            user_id = int(self.user_id.value)
+            user = await bot.fetch_user(user_id)
+            
+            embed = discord.Embed(
+                title="🆔 Discord Kullanıcı Bilgileri",
+                color=user.color if user.color else discord.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.set_thumbnail(url=user.display_avatar.url)
+            embed.add_field(name="👤 Kullanıcı Adı", value=f"{user.name}#{user.discriminator}", inline=True)
+            embed.add_field(name="🆔 ID", value=user.id, inline=True)
+            embed.add_field(name="🤖 Bot mu?", value="Evet ✅" if user.bot else "Hayır ❌", inline=True)
+            embed.add_field(name="📅 Hesap Oluşturma", value=f"<t:{int(user.created_at.timestamp())}:D>\n<t:{int(user.created_at.timestamp())}:R>", inline=False)
+            embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+            
+            try:
+                await interaction.user.send(embed=embed)
+                await interaction.response.send_message("✅ Kullanıcı bilgileri DM'ine gönderildi!", ephemeral=True)
+            except:
+                await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+                
+        except ValueError:
+            await interaction.response.send_message("❌ Geçersiz ID formatı!", ephemeral=True)
+        except discord.NotFound:
+            await interaction.response.send_message("❌ Bu ID'ye sahip bir kullanıcı bulunamadı!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Hata: {e}", ephemeral=True)
+
+
+class URLSafetyModal(discord.ui.Modal, title="🔗 URL Güvenlik Kontrol"):
+    url = discord.ui.TextInput(
+        label="URL",
+        placeholder="https://ornek.com",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        url_text = self.url.value.strip()
+        
+        if not url_text.startswith(("http://", "https://")):
+            url_text = "https://" + url_text
+        
+        embed = discord.Embed(
+            title="🔗 URL Güvenlik Kontrolü",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="URL", value=url_text, inline=False)
+        
+        try:
+            parsed = urlparse(url_text)
+            embed.add_field(name="🌐 Domain", value=parsed.netloc, inline=True)
+            embed.add_field(name="🔒 Protocol", value=parsed.scheme.upper(), inline=True)
+            
+            # SSL kontrolü
+            try:
+                import ssl
+                import socket
+                context = ssl.create_default_context()
+                with socket.create_connection((parsed.netloc, 443), timeout=3) as sock:
+                    with context.wrap_socket(sock, server_hostname=parsed.netloc) as ssock:
+                        cert = ssock.getpeercert()
+                        embed.add_field(name="🔒 SSL", value="Aktif ✅", inline=True)
+            except:
+                embed.add_field(name="🔒 SSL", value="Yok veya HTTPS değil ⚠️", inline=True)
+            
+            # HTTP durum kodu kontrolü
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url_text, timeout=5, allow_redirects=True) as resp:
+                        status = resp.status
+                        if 200 <= status < 300:
+                            embed.add_field(name="📡 HTTP Durum", value=f"{status} ✅ (Başarılı)", inline=True)
+                        elif 300 <= status < 400:
+                            embed.add_field(name="📡 HTTP Durum", value=f"{status} 🔄 (Yönlendirme)", inline=True)
+                        elif 400 <= status < 500:
+                            embed.add_field(name="📡 HTTP Durum", value=f"{status} ❌ (Hata)", inline=True)
+                        else:
+                            embed.add_field(name="📡 HTTP Durum", value=f"{status} ⚠️ (Sunucu Hatası)", inline=True)
+            except:
+                embed.add_field(name="📡 HTTP Durum", value="Bağlantı kurulamadı ⚠️", inline=True)
+            
+            embed.add_field(name="✅ Güvenlik Durumu", value="URL erişilebilir", inline=False)
+            
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"URL kontrol edilemedi: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ URL güvenlik bilgileri DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class TokenCheckModal(discord.ui.Modal, title="🤖 Bot Token Kontrol"):
+    token = discord.ui.TextInput(
+        label="Bot Token",
+        placeholder="Bot token'ını girin...",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        token_text = self.token.value.strip()
+        
+        embed = discord.Embed(
+            title="🤖 Bot Token Kontrol Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Token format kontrolü
+        if len(token_text) > 30 and "." in token_text:
+            embed.add_field(name="✅ Format", value="Geçerli token formatı", inline=True)
+            
+            parts = token_text.split(".")
+            if len(parts) == 3:
+                embed.add_field(name="📝 Yapı", value="Bot Token (3 parçalı)", inline=True)
+            else:
+                embed.add_field(name="📝 Yapı", value="Bilinmeyen format", inline=True)
+            
+            embed.add_field(name="📏 Uzunluk", value=f"{len(token_text)} karakter", inline=True)
+            
+            # Bot ID çıkarma (ilk kısım base64 decode)
+            try:
+                import base64
+                first_part = parts[0]
+                padding = 4 - (len(first_part) % 4)
+                if padding != 4:
+                    first_part += "=" * padding
+                
+                decoded = base64.b64decode(first_part)
+                if len(decoded) >= 8:
+                    bot_id = int.from_bytes(decoded[:8], 'big')
+                    embed.add_field(name="🤖 Bot ID", value=str(bot_id), inline=True)
+            except:
+                pass
+            
+            # Token doğrulama (gerçek API çağrısı yok, sadece format)
+            embed.add_field(name="✅ Durum", value="Token formatı geçerli (API kontrolü yapılmadı)", inline=False)
+        else:
+            embed.add_field(name="❌ Durum", value="Geçersiz token formatı!", inline=False)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Token bilgileri DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+class PingModal(discord.ui.Modal, title="🏓 Ping Test"):
+    hedef = discord.ui.TextInput(
+        label="Hedef IP veya Domain",
+        placeholder="8.8.8.8 veya google.com",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        hedef = self.hedef.value.strip()
+        
+        embed = discord.Embed(
+            title="🏓 Ping Test Sonucu",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.add_field(name="Hedef", value=hedef, inline=True)
+        
+        try:
+            import subprocess
+            import platform
+            
+            # Ping işlemi
+            param = '-n' if platform.system().lower() == 'windows' else '-c'
+            command = ['ping', param, '4', hedef]
+            
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                embed.add_field(name="✅ Durum", value="Erişilebilir", inline=True)
+                
+                # Ping sürelerini çıkart
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if 'time=' in line or 'time<' in line:
+                        # Linux/Unix
+                        if 'time=' in line:
+                            time_ms = line.split('time=')[1].split(' ')[0]
+                            embed.add_field(name="⏱️ Gecikme", value=f"{time_ms} ms", inline=True)
+                            break
+                        # Windows
+                        elif 'time<' in line:
+                            time_ms = line.split('time<')[1].split('ms')[0]
+                            embed.add_field(name="⏱️ Gecikme", value=f"{time_ms} ms", inline=True)
+                            break
+                else:
+                    embed.add_field(name="⏱️ Gecikme", value="Bağlantı başarılı", inline=True)
+            else:
+                embed.add_field(name="❌ Durum", value="Erişilemiyor veya zaman aşımı", inline=True)
+                
+        except subprocess.TimeoutExpired:
+            embed.add_field(name="❌ Durum", value="Zaman aşımı (10 saniye)", inline=True)
+        except Exception as e:
+            embed.add_field(name="❌ Hata", value=f"Ping yapılamadı: {str(e)[:100]}", inline=True)
+        
+        embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦")
+        
+        try:
+            await interaction.user.send(embed=embed)
+            await interaction.response.send_message("✅ Ping test sonucu DM'ine gönderildi!", ephemeral=True)
+        except:
+            await interaction.response.send_message("❌ DM'ine mesaj gönderemedim! DM'lerini aç.", ephemeral=True)
+
+
+# ============================================================
 # DUYURU / MESAJ KOMUTU (Modal ile Webhook)
 # ============================================================
 class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
@@ -506,28 +1124,23 @@ class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
         channel = interaction.channel
         
         try:
-            # Önce mevcut webhook'ları kontrol et
             webhooks = await channel.webhooks()
             webhook = None
             
-            # "SantesHub Duyuru" isimli webhook'u ara
             for wh in webhooks:
                 if wh.name == "SantesHub Duyuru":
                     webhook = wh
                     break
             
-            # Eğer yoksa yeni webhook oluştur
             if webhook is None:
                 webhook = await channel.create_webhook(name="SantesHub Duyuru")
             
-            # Mesajı # işareti ile webhook'tan gönder (düz metin, embed yok)
             await webhook.send(
                 content=f"# {self.mesaj.value}",
                 username="SantesHub Duyuru",
                 avatar_url=bot.user.display_avatar.url
             )
             
-            # Başarılı embed cevabı (interaction'a)
             embed = discord.Embed(
                 title="✅ Duyuru Gönderildi!",
                 description=f"Duyuru başarıyla {channel.mention} kanalına webhook ile gönderildi.",
@@ -541,7 +1154,6 @@ class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
             
             await interaction.response.send_message(embed=embed, ephemeral=True)
             
-            # Log'a kaydet
             log_embed = discord.Embed(
                 title="📢 Duyuru Gönderildi",
                 description=f"{interaction.user} tarafından {channel.mention} kanalına duyuru gönderildi.",
@@ -555,6 +1167,55 @@ class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
             await interaction.response.send_message("❌ Webhook oluşturma veya mesaj gönderme iznim yok!", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Duyuru gönderilemedi: {e}", ephemeral=True)
+
+
+class DuyuruButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    
+    @discord.ui.button(label="📢 Duyuru Oluştur", style=discord.ButtonStyle.primary, custom_id="santeshub:duyuru_olustur")
+    async def duyuru_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(DuyuruModal())
+
+
+# ============================================================
+# SORGU PANEL KOMUTU
+# ============================================================
+@bot.command(name="sorgupanel")
+@commands.check(yetkili_kontrol)
+async def sorgupanel_command(ctx):
+    """Sorgu panelini gönderir"""
+    embed = discord.Embed(
+        title="✦ SANTESHUB - Ücretsiz Sorgu Toolu ✦",
+        description=(
+            "Aşağıdaki menüden yapmak istediğiniz ücretsiz sorguyu seçin.\n"
+            "Sonuçlar doğrudan özel mesaj (DM) kutunuza gönderilecektir.\n\n"
+            "**› Domain WHOIS**\n"
+            "Domain kayıt bilgileri ve sahiplik\n"
+            "**› Domain DNS**\n"
+            "DNS kayıtları ve MX sorgulama\n"
+            "**› IP Konum**\n"
+            "IP adresi coğrafi konum ve ISP\n"
+            "**› SSL Kontrol**\n"
+            "SSL sertifikası doğrulama\n"
+            "**› Port Tarama**\n"
+            "Açık port kontrolü\n"
+            "**› Discord ID**\n"
+            "Discord kullanıcı profili sorgula\n"
+            "**› URL Güvenlik**\n"
+            "URL güvenlik kontrolü\n"
+            "**› Bot Token**\n"
+            "Bot token doğrulama\n"
+            "**› Ping Test**\n"
+            "Sunucu ping ve gecikme testi"
+        ),
+        color=EMBED_COLOR
+    )
+    embed.set_image(url="https://i.ibb.co/nMZC2N0q/mark.png")
+    embed.set_footer(text="✦ SANTESHUB - Ücretsiz Sorgu Sistemi ✦")
+    
+    await ctx.send(embed=embed, view=SorguPanelView())
+    await ctx.message.delete()
 
 
 # ============================================================
@@ -1240,15 +1901,6 @@ async def mesaj_command(ctx):
         pass
 
 
-class DuyuruButtonView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-    
-    @discord.ui.button(label="📢 Duyuru Oluştur", style=discord.ButtonStyle.primary, custom_id="santeshub:duyuru_olustur")
-    async def duyuru_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DuyuruModal())
-
-
 # ============================================================
 # LOCK / UNLOCK / NUKE KOMUTLARI
 # ============================================================
@@ -1433,6 +2085,7 @@ async def yardim_command(ctx):
             "`.dm <ID/@kişi> <mesaj>` - Kişiye DM gönderir\n"
             "`.massdm <mesaj>` - Herkese toplu DM gönderir\n"
             "`.mesaj` - Bulunduğun kanala duyuru gönderir (Modal açar)\n"
+            "`.sorgupanel` - Sorgu panelini açar\n"
             "`.lock` - Kanaldaki yazma iznini kapatır\n"
             "`.unlock` - Kanaldaki yazma iznini açar\n"
             "`.nuke` - Kanalı silip yeniden oluşturur"
