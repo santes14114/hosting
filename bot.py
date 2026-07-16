@@ -483,6 +483,36 @@ async def send_log(embed: discord.Embed, channel_id: int = LOG_CHANNEL_ID):
 
 
 # ============================================================
+# LOG FONKSİYONLARI
+# ============================================================
+async def log_member_join(member: discord.Member):
+    embed = discord.Embed(
+        title="👤 Üye Katıldı",
+        description=f"{member.mention} ({member}) sunucuya katıldı.",
+        color=discord.Color.green(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="ID", value=member.id, inline=True)
+    embed.add_field(name="Hesap Oluşturma", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Toplam Üye: {member.guild.member_count}")
+    await send_log(embed)
+
+
+async def log_member_remove(member: discord.Member):
+    embed = discord.Embed(
+        title="👤 Üye Ayrıldı",
+        description=f"{member} ({member.mention}) sunucudan ayrıldı.",
+        color=discord.Color.red(),
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="ID", value=member.id, inline=True)
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Toplam Üye: {member.guild.member_count}")
+    await send_log(embed)
+
+
+# ============================================================
 # TICKET SİSTEMİ
 # ============================================================
 class TicketPanelView(discord.ui.View):
@@ -641,7 +671,8 @@ class KeySelect(discord.ui.Select):
             placeholder="📋 Key süresi seçiniz...",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
+            custom_id="santeshub:key_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -800,7 +831,8 @@ class SorguSelect(discord.ui.Select):
             placeholder="📋 Sorgu seçiniz...",
             min_values=1,
             max_values=1,
-            options=options
+            options=options,
+            custom_id="santeshub:sorgu_select"
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -1388,6 +1420,257 @@ class PingModal(discord.ui.Modal, title="🏓 Ping Test"):
 
 
 # ============================================================
+# DUYURU SİSTEMİ
+# ============================================================
+class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
+    mesaj = discord.ui.TextInput(
+        label="Duyuru Mesajı",
+        style=discord.TextStyle.paragraph,
+        placeholder="Duyuru metnini buraya yaz...",
+        max_length=4000,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        channel = interaction.channel
+        
+        try:
+            webhooks = await channel.webhooks()
+            webhook = None
+            
+            for wh in webhooks:
+                if wh.name == "SantesHub Duyuru":
+                    webhook = wh
+                    break
+            
+            if webhook is None:
+                webhook = await channel.create_webhook(name="SantesHub Duyuru")
+            
+            await webhook.send(
+                content=f"# {self.mesaj.value}",
+                username="SantesHub Duyuru",
+                avatar_url=bot.user.display_avatar.url
+            )
+            
+            embed = discord.Embed(
+                title="✅ Duyuru Gönderildi!",
+                description=f"Duyuru başarıyla {channel.mention} kanalına webhook ile gönderildi.",
+                color=discord.Color.green(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.add_field(name="📢 Mesaj", value=f"```\n{self.mesaj.value[:500]}\n```", inline=False)
+            embed.add_field(name="👤 Gönderen", value=interaction.user.mention, inline=True)
+            embed.add_field(name="🪝 Webhook", value="SantesHub Duyuru", inline=True)
+            embed.set_footer(text=f"{SERVER_NAME} • Duyuru Sistemi")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            log_embed = discord.Embed(
+                title="📢 Duyuru Gönderildi",
+                description=f"{interaction.user} tarafından {channel.mention} kanalına duyuru gönderildi.",
+                color=discord.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            log_embed.add_field(name="Mesaj", value=self.mesaj.value[:1000], inline=False)
+            await send_log(log_embed)
+            
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Webhook oluşturma veya mesaj gönderme iznim yok!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Duyuru gönderilemedi: {e}", ephemeral=True)
+
+
+class DuyuruButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    
+    @discord.ui.button(label="📢 Duyuru Oluştur", style=discord.ButtonStyle.primary, custom_id="santeshub:duyuru_olustur")
+    async def duyuru_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(DuyuruModal())
+
+
+# ============================================================
+# BOT DURUMU
+# ============================================================
+@tasks.loop(minutes=1)
+async def update_presence():
+    await bot.wait_until_ready()
+    guild = bot.guilds[0] if bot.guilds else None
+    
+    if guild:
+        member_count = guild.member_count
+        uptime = get_uptime()
+        
+        activity = discord.Activity(
+            type=discord.ActivityType.streaming,
+            name=f"📡 SantesHub • 👥 {member_count} Üye • ⏱️ {uptime}",
+            url="https://www.twitch.tv/santeshub"
+        )
+        
+        await bot.change_presence(
+            activity=activity,
+            status=discord.Status.online
+        )
+
+
+# ============================================================
+# PANEL OTOMATİK GÖNDERİM
+# ============================================================
+async def send_ticket_panel_automatically():
+    for guild in bot.guilds:
+        channel = guild.get_channel(TICKET_CHANNEL_ID)
+        if channel is None:
+            continue
+        try:
+            async for message in channel.history(limit=50):
+                if message.author == bot.user and message.embeds:
+                    for embed in message.embeds:
+                        if embed.title and "Destek Talebi" in embed.title:
+                            return
+        except:
+            pass
+        
+        embed = discord.Embed(
+            title="🎫 Destek Talebi",
+            description=(
+                "Sorunun mu var, yardıma mı ihtiyacın var?\n\n"
+                "Aşağıdaki **📩 Talep Aç** butonuna tıkla, sana özel bir kanal açalım.\n\n"
+                "**📌 Lütfen:**\n"
+                "• Sorununu net şekilde yaz\n"
+                "• Görsel/video ekleyebilirsin\n"
+                "• Sorun çözülünce 🔒 butonuyla talebi kapat"
+            ),
+            color=EMBED_COLOR,
+        )
+        embed.set_footer(text=f"{SERVER_NAME} • Destek Sistemi")
+        try:
+            await channel.send(embed=embed, view=TicketPanelView())
+            log.info(f"✅ Ticket paneli {channel.name} kanalına gönderildi.")
+        except:
+            pass
+
+
+async def send_contact_panel_automatically():
+    for guild in bot.guilds:
+        channel = guild.get_channel(KURUCU_DESTEK_CHANNEL_ID)
+        if channel is None:
+            continue
+        try:
+            async for message in channel.history(limit=50):
+                if message.author == bot.user and message.embeds:
+                    for embed in message.embeds:
+                        if embed.title and "Kurucu ile İletişim" in embed.title:
+                            return
+        except:
+            pass
+        
+        embed = discord.Embed(
+            title="✉️ Kurucu ile İletişim",
+            description=(
+                "Kurucumuza iletmek istediğin bir mesaj mı var?\n\n"
+                "Aşağıdaki **✉️ Mesaj Gönder** butonuna tıkla, açılan formu doldur ve gönder.\n"
+                "Mesajın direkt kurucumuza iletilecek."
+            ),
+            color=EMBED_COLOR,
+        )
+        embed.set_footer(text=f"{SERVER_NAME} • Kurucu İletişim Sistemi")
+        try:
+            await channel.send(embed=embed, view=ContactFounderView())
+            log.info(f"✅ İletişim paneli {channel.name} kanalına gönderildi.")
+        except:
+            pass
+
+
+# ============================================================
+# EVENT'LER
+# ============================================================
+@bot.event
+async def on_ready():
+    await bot.wait_until_ready()
+    
+    update_presence.start()
+    
+    await send_ticket_panel_automatically()
+    await send_contact_panel_automatically()
+    
+    # Persistent View'ları ekle
+    bot.add_view(TicketPanelView())
+    bot.add_view(TicketControlView())
+    bot.add_view(ContactFounderView())
+    bot.add_view(KeyPanelView())
+    
+    log.info(f"✅ {bot.user} olarak giriş yapıldı!")
+    log.info(f"📊 {len(bot.guilds)} sunucuda aktif.")
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
+    if channel:
+        try:
+            file = await build_member_card(member, WELCOME_BG, is_welcome=True)
+            embed = discord.Embed(color=EMBED_COLOR)
+            embed.set_image(url="attachment://card.png")
+            embed.set_footer(text=f"Sunucumuz artık {member.guild.member_count} kişi! 🚀")
+            await channel.send(content=f"{member.mention} Hoşgeldin! 🎉", embed=embed, file=file)
+            log.info(f"✅ {member} için karşılama kartı gönderildi!")
+        except Exception as e:
+            log.error(f"Karşılama kartı hatası: {e}")
+            await channel.send(f"{member.mention} SantesHub'a hoşgeldin! 🎉")
+    await log_member_join(member)
+
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
+    if channel:
+        try:
+            file = await build_member_card(member, GOODBYE_BG, is_welcome=False)
+            embed = discord.Embed(color=EMBED_COLOR)
+            embed.set_image(url="attachment://card.png")
+            embed.set_footer(text=f"Şu an {member.guild.member_count} kişi kaldık.")
+            await channel.send(content=f"**{member}** aramızdan ayrıldı. 👋", embed=embed, file=file)
+            log.info(f"✅ {member} için uğurlama kartı gönderildi!")
+        except Exception as e:
+            log.error(f"Uğurlama kartı hatası: {e}")
+            await channel.send(f"**{member}** aramızdan ayrıldı. 👋")
+    await log_member_remove(member)
+
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot or message.guild is None:
+        return
+
+    AUTO_REPLIES = [
+        (r"\b(sa|selam|selamun aleykum)\b", "Aleyküm selam! 👋 {mention} SantesHub'a hoş geldin!"),
+        (r"\bnaber\b", "İyidir, senden naber {mention}? 😄"),
+        (r"\b(yardım|yardim)\b", "Yardıma mı ihtiyacın var {mention}? 🎫 Ticket açabilirsin!"),
+    ]
+    AUTO_REPLY_COOLDOWN = 30
+    _last_reply_at = getattr(bot, '_last_reply_at', {})
+    
+    reply = None
+    for pattern, response in AUTO_REPLIES:
+        if re.search(pattern, message.content.lower()):
+            reply = response
+            break
+    
+    if reply:
+        now = datetime.now(timezone.utc).timestamp()
+        last = _last_reply_at.get(message.author.id, 0)
+        if now - last >= AUTO_REPLY_COOLDOWN:
+            _last_reply_at[message.author.id] = now
+            bot._last_reply_at = _last_reply_at
+            try:
+                await message.channel.send(reply.format(mention=message.author.mention))
+            except:
+                pass
+
+    await bot.process_commands(message)
+
+
+# ============================================================
 # KOMUTLAR
 # ============================================================
 @bot.command(name="keypanel")
@@ -1679,76 +1962,6 @@ async def sorgupanel_command(ctx):
     await ctx.message.delete()
 
 
-# ============================================================
-# DUYURU KOMUTU
-# ============================================================
-class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
-    mesaj = discord.ui.TextInput(
-        label="Duyuru Mesajı",
-        style=discord.TextStyle.paragraph,
-        placeholder="Duyuru metnini buraya yaz...",
-        max_length=4000,
-        required=True,
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        channel = interaction.channel
-        
-        try:
-            webhooks = await channel.webhooks()
-            webhook = None
-            
-            for wh in webhooks:
-                if wh.name == "SantesHub Duyuru":
-                    webhook = wh
-                    break
-            
-            if webhook is None:
-                webhook = await channel.create_webhook(name="SantesHub Duyuru")
-            
-            await webhook.send(
-                content=f"# {self.mesaj.value}",
-                username="SantesHub Duyuru",
-                avatar_url=bot.user.display_avatar.url
-            )
-            
-            embed = discord.Embed(
-                title="✅ Duyuru Gönderildi!",
-                description=f"Duyuru başarıyla {channel.mention} kanalına webhook ile gönderildi.",
-                color=discord.Color.green(),
-                timestamp=datetime.now(timezone.utc)
-            )
-            embed.add_field(name="📢 Mesaj", value=f"```\n{self.mesaj.value[:500]}\n```", inline=False)
-            embed.add_field(name="👤 Gönderen", value=interaction.user.mention, inline=True)
-            embed.add_field(name="🪝 Webhook", value="SantesHub Duyuru", inline=True)
-            embed.set_footer(text=f"{SERVER_NAME} • Duyuru Sistemi")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            
-            log_embed = discord.Embed(
-                title="📢 Duyuru Gönderildi",
-                description=f"{interaction.user} tarafından {channel.mention} kanalına duyuru gönderildi.",
-                color=discord.Color.blue(),
-                timestamp=datetime.now(timezone.utc)
-            )
-            log_embed.add_field(name="Mesaj", value=self.mesaj.value[:1000], inline=False)
-            await send_log(log_embed)
-            
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ Webhook oluşturma veya mesaj gönderme iznim yok!", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Duyuru gönderilemedi: {e}", ephemeral=True)
-
-
-class DuyuruButtonView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-    
-    @discord.ui.button(label="📢 Duyuru Oluştur", style=discord.ButtonStyle.primary, custom_id="santeshub:duyuru_olustur")
-    async def duyuru_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DuyuruModal())
-
-
 @bot.command(name="mesaj")
 @commands.check(yetkili_kontrol)
 async def mesaj_command(ctx):
@@ -1759,186 +1972,37 @@ async def mesaj_command(ctx):
         pass
 
 
-# ============================================================
-# BOT DURUMU
-# ============================================================
-@tasks.loop(minutes=1)
-async def update_presence():
-    await bot.wait_until_ready()
-    guild = bot.guilds[0] if bot.guilds else None
-    
-    if guild:
-        member_count = guild.member_count
-        uptime = get_uptime()
-        
-        activity = discord.Activity(
-            type=discord.ActivityType.streaming,
-            name=f"📡 SantesHub • 👥 {member_count} Üye • ⏱️ {uptime}",
-            url="https://www.twitch.tv/santeshub"
-        )
-        
-        await bot.change_presence(
-            activity=activity,
-            status=discord.Status.online
-        )
+@bot.command(name="ping")
+async def ping_command(ctx):
+    latency = round(bot.latency * 1000)
+    uptime = get_uptime()
+    embed = discord.Embed(
+        title="🏓 Pong!",
+        description=f"**Gecikme:** {latency}ms\n**Çalışma Süresi:** {uptime}",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
 
 
-# ============================================================
-# EVENT'LER
-# ============================================================
-@bot.event
-async def on_ready():
-    await bot.wait_until_ready()
-    
-    update_presence.start()
-    
-    await send_ticket_panel_automatically()
-    await send_contact_panel_automatically()
-    
-    bot.add_view(TicketPanelView())
-    bot.add_view(TicketControlView())
-    bot.add_view(ContactFounderView())
-    bot.add_view(KeyPanelView())
-    
-    log.info(f"✅ {bot.user} olarak giriş yapıldı!")
-    log.info(f"📊 {len(bot.guilds)} sunucuda aktif.")
+@bot.command(name="sunucu")
+async def sunucu_command(ctx):
+    guild = ctx.guild
+    embed = discord.Embed(
+        title=f"🏰 {guild.name}",
+        color=EMBED_COLOR,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    embed.add_field(name="👑 Sahip", value=guild.owner.mention, inline=True)
+    embed.add_field(name="👥 Üye Sayısı", value=guild.member_count, inline=True)
+    embed.add_field(name="📅 Kuruluş", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
+    embed.add_field(name="📢 Kanal Sayısı", value=len(guild.channels), inline=True)
+    embed.add_field(name="🎭 Rol Sayısı", value=len(guild.roles), inline=True)
+    embed.add_field(name="💬 Boost", value=guild.premium_subscription_count or 0, inline=True)
+    embed.set_footer(text=f"{SERVER_NAME} • Sunucu Bilgileri")
+    await ctx.send(embed=embed)
 
 
-async def send_ticket_panel_automatically():
-    for guild in bot.guilds:
-        channel = guild.get_channel(TICKET_CHANNEL_ID)
-        if channel is None:
-            continue
-        try:
-            async for message in channel.history(limit=50):
-                if message.author == bot.user and message.embeds:
-                    for embed in message.embeds:
-                        if embed.title and "Destek Talebi" in embed.title:
-                            return
-        except:
-            pass
-        
-        embed = discord.Embed(
-            title="🎫 Destek Talebi",
-            description=(
-                "Sorunun mu var, yardıma mı ihtiyacın var?\n\n"
-                "Aşağıdaki **📩 Talep Aç** butonuna tıkla, sana özel bir kanal açalım.\n\n"
-                "**📌 Lütfen:**\n"
-                "• Sorununu net şekilde yaz\n"
-                "• Görsel/video ekleyebilirsin\n"
-                "• Sorun çözülünce 🔒 butonuyla talebi kapat"
-            ),
-            color=EMBED_COLOR,
-        )
-        embed.set_footer(text=f"{SERVER_NAME} • Destek Sistemi")
-        try:
-            await channel.send(embed=embed, view=TicketPanelView())
-            log.info(f"✅ Ticket paneli {channel.name} kanalına gönderildi.")
-        except:
-            pass
-
-
-async def send_contact_panel_automatically():
-    for guild in bot.guilds:
-        channel = guild.get_channel(KURUCU_DESTEK_CHANNEL_ID)
-        if channel is None:
-            continue
-        try:
-            async for message in channel.history(limit=50):
-                if message.author == bot.user and message.embeds:
-                    for embed in message.embeds:
-                        if embed.title and "Kurucu ile İletişim" in embed.title:
-                            return
-        except:
-            pass
-        
-        embed = discord.Embed(
-            title="✉️ Kurucu ile İletişim",
-            description=(
-                "Kurucumuza iletmek istediğin bir mesaj mı var?\n\n"
-                "Aşağıdaki **✉️ Mesaj Gönder** butonuna tıkla, açılan formu doldur ve gönder.\n"
-                "Mesajın direkt kurucumuza iletilecek."
-            ),
-            color=EMBED_COLOR,
-        )
-        embed.set_footer(text=f"{SERVER_NAME} • Kurucu İletişim Sistemi")
-        try:
-            await channel.send(embed=embed, view=ContactFounderView())
-            log.info(f"✅ İletişim paneli {channel.name} kanalına gönderildi.")
-        except:
-            pass
-
-
-@bot.event
-async def on_member_join(member: discord.Member):
-    channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
-    if channel:
-        try:
-            file = await build_member_card(member, WELCOME_BG, is_welcome=True)
-            embed = discord.Embed(color=EMBED_COLOR)
-            embed.set_image(url="attachment://card.png")
-            embed.set_footer(text=f"Sunucumuz artık {member.guild.member_count} kişi! 🚀")
-            await channel.send(content=f"{member.mention} Hoşgeldin! 🎉", embed=embed, file=file)
-            log.info(f"✅ {member} için karşılama kartı gönderildi!")
-        except Exception as e:
-            log.error(f"Karşılama kartı hatası: {e}")
-            await channel.send(f"{member.mention} SantesHub'a hoşgeldin! 🎉")
-    await log_member_join(member)
-
-
-@bot.event
-async def on_member_remove(member: discord.Member):
-    channel = member.guild.get_channel(GELEN_GIDEN_CHANNEL_ID)
-    if channel:
-        try:
-            file = await build_member_card(member, GOODBYE_BG, is_welcome=False)
-            embed = discord.Embed(color=EMBED_COLOR)
-            embed.set_image(url="attachment://card.png")
-            embed.set_footer(text=f"Şu an {member.guild.member_count} kişi kaldık.")
-            await channel.send(content=f"**{member}** aramızdan ayrıldı. 👋", embed=embed, file=file)
-            log.info(f"✅ {member} için uğurlama kartı gönderildi!")
-        except Exception as e:
-            log.error(f"Uğurlama kartı hatası: {e}")
-            await channel.send(f"**{member}** aramızdan ayrıldı. 👋")
-    await log_member_remove(member)
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or message.guild is None:
-        return
-
-    AUTO_REPLIES = [
-        (r"\b(sa|selam|selamun aleykum)\b", "Aleyküm selam! 👋 {mention} SantesHub'a hoş geldin!"),
-        (r"\bnaber\b", "İyidir, senden naber {mention}? 😄"),
-        (r"\b(yardım|yardim)\b", "Yardıma mı ihtiyacın var {mention}? 🎫 Ticket açabilirsin!"),
-    ]
-    AUTO_REPLY_COOLDOWN = 30
-    _last_reply_at = getattr(bot, '_last_reply_at', {})
-    
-    reply = None
-    for pattern, response in AUTO_REPLIES:
-        if re.search(pattern, message.content.lower()):
-            reply = response
-            break
-    
-    if reply:
-        now = datetime.now(timezone.utc).timestamp()
-        last = _last_reply_at.get(message.author.id, 0)
-        if now - last >= AUTO_REPLY_COOLDOWN:
-            _last_reply_at[message.author.id] = now
-            bot._last_reply_at = _last_reply_at
-            try:
-                await message.channel.send(reply.format(mention=message.author.mention))
-            except:
-                pass
-
-    await bot.process_commands(message)
-
-
-# ============================================================
-# YARDIM KOMUTU
-# ============================================================
 @bot.command(name="yardim")
 async def yardim_command(ctx):
     embed = discord.Embed(
@@ -1999,37 +2063,6 @@ async def yardim_command(ctx):
     )
     
     embed.set_footer(text=f"{SERVER_NAME} • Yardım Menüsü")
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="ping")
-async def ping_command(ctx):
-    latency = round(bot.latency * 1000)
-    uptime = get_uptime()
-    embed = discord.Embed(
-        title="🏓 Pong!",
-        description=f"**Gecikme:** {latency}ms\n**Çalışma Süresi:** {uptime}",
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="sunucu")
-async def sunucu_command(ctx):
-    guild = ctx.guild
-    embed = discord.Embed(
-        title=f"🏰 {guild.name}",
-        color=EMBED_COLOR,
-        timestamp=datetime.now(timezone.utc)
-    )
-    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
-    embed.add_field(name="👑 Sahip", value=guild.owner.mention, inline=True)
-    embed.add_field(name="👥 Üye Sayısı", value=guild.member_count, inline=True)
-    embed.add_field(name="📅 Kuruluş", value=f"<t:{int(guild.created_at.timestamp())}:D>", inline=True)
-    embed.add_field(name="📢 Kanal Sayısı", value=len(guild.channels), inline=True)
-    embed.add_field(name="🎭 Rol Sayısı", value=len(guild.roles), inline=True)
-    embed.add_field(name="💬 Boost", value=guild.premium_subscription_count or 0, inline=True)
-    embed.set_footer(text=f"{SERVER_NAME} • Sunucu Bilgileri")
     await ctx.send(embed=embed)
 
 
