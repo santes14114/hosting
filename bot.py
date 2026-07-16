@@ -491,6 +491,73 @@ class ContactFounderView(discord.ui.View):
 
 
 # ============================================================
+# DUYURU / MESAJ KOMUTU (Modal ile Webhook)
+# ============================================================
+class DuyuruModal(discord.ui.Modal, title="📢 Duyuru Oluştur"):
+    mesaj = discord.ui.TextInput(
+        label="Duyuru Mesajı",
+        style=discord.TextStyle.paragraph,
+        placeholder="Duyuru metnini buraya yaz...",
+        max_length=4000,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        channel = interaction.channel
+        
+        try:
+            # Önce mevcut webhook'ları kontrol et
+            webhooks = await channel.webhooks()
+            webhook = None
+            
+            # "SantesHub Duyuru" isimli webhook'u ara
+            for wh in webhooks:
+                if wh.name == "SantesHub Duyuru":
+                    webhook = wh
+                    break
+            
+            # Eğer yoksa yeni webhook oluştur
+            if webhook is None:
+                webhook = await channel.create_webhook(name="SantesHub Duyuru")
+            
+            # Mesajı # işareti ile webhook'tan gönder (düz metin, embed yok)
+            await webhook.send(
+                content=f"# {self.mesaj.value}",
+                username="SantesHub Duyuru",
+                avatar_url=bot.user.display_avatar.url
+            )
+            
+            # Başarılı embed cevabı (interaction'a)
+            embed = discord.Embed(
+                title="✅ Duyuru Gönderildi!",
+                description=f"Duyuru başarıyla {channel.mention} kanalına webhook ile gönderildi.",
+                color=discord.Color.green(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            embed.add_field(name="📢 Mesaj", value=f"```\n{self.mesaj.value[:500]}\n```", inline=False)
+            embed.add_field(name="👤 Gönderen", value=interaction.user.mention, inline=True)
+            embed.add_field(name="🪝 Webhook", value="SantesHub Duyuru", inline=True)
+            embed.set_footer(text=f"{SERVER_NAME} • Duyuru Sistemi")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # Log'a kaydet
+            log_embed = discord.Embed(
+                title="📢 Duyuru Gönderildi",
+                description=f"{interaction.user} tarafından {channel.mention} kanalına duyuru gönderildi.",
+                color=discord.Color.blue(),
+                timestamp=datetime.now(timezone.utc)
+            )
+            log_embed.add_field(name="Mesaj", value=self.mesaj.value[:1000], inline=False)
+            await send_log(log_embed)
+            
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ Webhook oluşturma veya mesaj gönderme iznim yok!", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Duyuru gönderilemedi: {e}", ephemeral=True)
+
+
+# ============================================================
 # OTOMATİK CEVAPLAR
 # ============================================================
 AUTO_REPLIES = [
@@ -1160,6 +1227,29 @@ async def massdm_command(ctx, *, mesaj: str):
 
 
 # ============================================================
+# MESAJ / DUYURU KOMUTU (Slash Command ve Prefix)
+# ============================================================
+@bot.command(name="mesaj")
+@commands.check(yetkili_kontrol)
+async def mesaj_command(ctx):
+    """Bulunduğun kanala webhook ile duyuru gönderir (Modal açar)"""
+    await ctx.send("📢 Duyuru oluşturmak için aşağıdaki butona tıkla!", view=DuyuruButtonView(), delete_after=30)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+
+class DuyuruButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+    
+    @discord.ui.button(label="📢 Duyuru Oluştur", style=discord.ButtonStyle.primary, custom_id="santeshub:duyuru_olustur")
+    async def duyuru_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(DuyuruModal())
+
+
+# ============================================================
 # LOCK / UNLOCK / NUKE KOMUTLARI
 # ============================================================
 @bot.command(name="lock")
@@ -1342,6 +1432,7 @@ async def yardim_command(ctx):
             "`.lookup @kişi` - Kullanıcı bilgilerini DM ile gönderir\n"
             "`.dm <ID/@kişi> <mesaj>` - Kişiye DM gönderir\n"
             "`.massdm <mesaj>` - Herkese toplu DM gönderir\n"
+            "`.mesaj` - Bulunduğun kanala duyuru gönderir (Modal açar)\n"
             "`.lock` - Kanaldaki yazma iznini kapatır\n"
             "`.unlock` - Kanaldaki yazma iznini açar\n"
             "`.nuke` - Kanalı silip yeniden oluşturur"
